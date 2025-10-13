@@ -1,0 +1,7 @@
+  int fd =
+                ::open("/dev/null",
+                       O_WRONLY | O_CLOEXEC); // will show as openat() in strace
+            if (fd >= 0) {
+                (void)::write(fd, "X", 1);
+                ::close(fd);
+            }
