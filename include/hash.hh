@@ -1,20 +1,11 @@
 // hash.hh
 #pragma once
+#include "hash_wrapper.hh"
 #include <cstdint>
 #include <seastar/core/smp.hh>
 #include <string_view>
 
 namespace shunyakv {
-
-// -------- FNV-1a 64-bit (unchanged) --------
-inline uint64_t fnv1a64(std::string_view s) noexcept {
-    uint64_t h = 14695981039346656037ull; // 0xcbf29ce484222325
-    for (unsigned char c : s) {
-        h ^= c;
-        h *= 1099511628211ull; // 0x100000001b3
-    }
-    return h;
-}
 
 // -------- Config knob: which shard index is the first *data* shard --------
 // Default = 0 (legacy: all shards 0..smp-1 are data). Set to 1 if shard 0 is
@@ -36,7 +27,7 @@ inline unsigned shard_for(std::string_view key) noexcept {
         return first; // degenerate: no data shards configured
     }
     const unsigned D = smp - first; // number of data shards
-    const uint64_t h = fnv1a64(key);
+    const uint64_t h = shunyakv::fnv1a64(key);
     const unsigned idx = unsigned(((__uint128_t)h * D) >> 64); // [0..D)
     return first + idx;                                        // shard id
 }
