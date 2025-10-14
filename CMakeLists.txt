@@ -18,7 +18,19 @@ set(SHUNYA_SRC_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(SHUNYA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(SHUNYA_TEST_DIR    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 
-if (BUILD_SERVER)
+# =========================================
+# FNV reference (vendored from lcn2/fnv)
+# =========================================
+# Some repos name it fnv.c; if you copied fnv64.c instead, we’ll fall back.
+set(FNV_REF_C "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fnv/hash_64a.c")
+if (NOT EXISTS "${FNV_REF_C}")
+  set(FNV_REF_C "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fnv/hash_32a.c")
+endif()
+
+add_library(fnv_ref STATIC "${FNV_REF_C}")
+target_include_directories(fnv_ref PUBLIC third_party/fnv)
+set_target_properties(fnv_ref PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # ---- Deps ----
 find_package (Seastar CONFIG REQUIRED)
 message(STATUS "Seastar found: ${Seastar_DIR}")
@@ -33,19 +45,6 @@ add_library(proto_helpers STATIC
 )
 target_link_libraries(proto_helpers PUBLIC Seastar::seastar)
 target_include_directories(proto_helpers PUBLIC ${SHUNYA_INCLUDE_DIR})
-
-# =========================================
-# FNV reference (vendored from lcn2/fnv)
-# =========================================
-# Some repos name it fnv.c; if you copied fnv64.c instead, we’ll fall back.
-set(FNV_REF_C "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fnv/hash_64a.c")
-if (NOT EXISTS "${FNV_REF_C}")
-  set(FNV_REF_C "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fnv/hash_32a.c")
-endif()
-
-add_library(fnv_ref STATIC "${FNV_REF_C}")
-target_include_directories(fnv_ref PUBLIC third_party/fnv)
-set_target_properties(fnv_ref PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # =========================================
 # Shunya store
@@ -67,6 +66,7 @@ set(SHUNYA_SOURCES
   # ${SHUNYA_SRC_DIR}/service.cc
 )
 
+if (BUILD_SERVER)
 add_executable(shunya_store ${SHUNYA_SOURCES})
 
 target_include_directories(shunya_store PRIVATE
