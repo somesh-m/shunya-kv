@@ -31,6 +31,7 @@ seastar::future<> handle_set(std::string_view args,
     // check if correct shard
     unsigned sid = shard_for(key_sv);
     if (sid != seastar::this_shard_id()) {
+        std::cout << "SET WRONGSHARD \n";
         co_await out.write("WRONGSHARD\r\n"); // or MOVED-CORE like below
         co_return;
     }

@@ -1,4 +1,5 @@
 // #include "metrics_logger.hh"
+#include "cmd_node_info.hh"
 #include "server_debug.hh"
 #include <chrono>
 #include <seastar/core/app-template.hh>
@@ -25,6 +26,16 @@ int main(int argc, char **argv) {
         if (this_shard_id() != 0) {
             co_return;
         }
+
+        // Config block
+        // TODO: Fetch this from config file
+        static node_cfg cfg;
+        cfg.base_port = 60110;
+        cfg.smp = seastar::smp::count;
+        cfg.port_offset = 1;
+        cfg.hash = "fnv1a64";
+        shunyakv::set_node_cfg(cfg);
+
         // TODO: Add logic to find free ports and assign to shards
         const uint16_t base_port = 60110;
         const unsigned shard_count = smp::count;
@@ -63,8 +74,8 @@ int main(int argc, char **argv) {
                                       << " -> shard " << sid << "\n";
                             auto peer = ar.remote_address;
                             std::cout << "Remote address: " << peer << "\n";
-                            return store.local().handle_session(
-                                std::move(ar.connection), peer, port);
+                            // return store.local().handle_session(
+                            //     std::move(ar.connection), peer, port);
                         })
                         .handle_exception([](std::exception_ptr e) {
                             std::cout << "Accept failed: " << e << "\n";

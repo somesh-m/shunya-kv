@@ -30,8 +30,8 @@ future<> tcp_server::handle_session(connected_socket s, socket_address peer,
                                     shunyakv::service &store) {
     s_log.info("accepted connection from {} (shard {})", peer, this_shard_id());
     auto *ps = &store;
-    s_log.debug("session on shard {} using service {}",
-                seastar::this_shard_id(), fmt::ptr(ps));
+    s_log.info("session on shard {} using service {}", seastar::this_shard_id(),
+               fmt::ptr(ps));
 
     auto in = input_stream<char>(s.input());
     auto out = output_stream<char>(s.output());
@@ -111,11 +111,12 @@ future<> tcp_server::start() {
     const auto sid = seastar::this_shard_id(); // gets the current shard id
     const auto port = uint16_t(
         _port + sid); // finds the port by adding the shard id to base port
+    std::cout << "Port from individual listener " << port << "\n";
     seastar::listen_options lo;
     lo.reuse_address = false;
     return seastar::do_with(
                seastar::listen(make_ipv4_address({"0.0.0.0", port}), lo),
-               [port, sid](seastar::server_socket &listener) {
+               [this, port, sid](seastar::server_socket &listener) {
                    s_log.info("Listening on port {} shard {}", port, sid);
                    s_log.info("Analyzing server socket port {} ",
                               listener.local_address().port());
@@ -126,12 +127,19 @@ future<> tcp_server::start() {
                    // until the lambda returns
                    // The lambda itself runs forever unless accept()
                    // fails
-                   return seastar::keep_doing([&listener]() {
+                   return seastar::keep_doing([this, &listener]() {
                               s_log.info("Came to conn loop");
                               return listener.accept()
-                                  .then([](seastar::accept_result res) {
+                                  .then([this, &listener](
+                                            seastar::accept_result res) {
                                       s_log.info("Accepted connection from "
                                                  "remote address");
+                                      auto peer = res.remote_address;
+                                      auto &store = this->_store.local();
+                                      res.connection.set_nodelay(true);
+                                      return handle_session(
+                                          std::move(res.connection),
+                                          std::move(peer), store);
                                   })
                                   .handle_exception([](std::exception_ptr e) {
                                       s_log.info("Accept failed: {}", e);

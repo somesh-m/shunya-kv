@@ -31,6 +31,7 @@ set(SHUNYA_SOURCES
   ${SHUNYA_SRC_DIR}/cmd_set.cc
   ${SHUNYA_SRC_DIR}/cmd_get.cc
   ${SHUNYA_SRC_DIR}/cmd_quit.cc
+  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
   ${SHUNYA_SRC_DIR}/router.cc
   ${SHUNYA_SRC_DIR}/kv_store.cc
   ${SHUNYA_SRC_DIR}/hash.cc

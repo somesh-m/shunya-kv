@@ -16,6 +16,7 @@ namespace shunyakv {
 //                                  seastar::smp::count);
 // }
 
+// TODO: Move all the logic to router.cc, we want to keep the header file clean
 class service {
   public:
     seastar::future<> start() {
@@ -25,12 +26,6 @@ class service {
     }
 
     seastar::future<> stop() { return _store.stop(); }
-
-    void handle_session(seastar::connected_socket s,
-                        seastar::socket_address peer, uint16_t port) {
-        std::cout << "accepted data on shard " << seastar::this_shard_id()
-                  << "\n";
-    }
 
     // Cross-shard safe API (std::string over the wire)
     seastar::future<bool> local_set(std::string key, std::string value) {
