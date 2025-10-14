@@ -13,6 +13,11 @@ if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
 
+# ---- Paths ----
+set(SHUNYA_SRC_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set(SHUNYA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(SHUNYA_TEST_DIR    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+
 if (BUILD_SERVER)
 # ---- Deps ----
 find_package (Seastar CONFIG REQUIRED)
@@ -20,11 +25,6 @@ message(STATUS "Seastar found: ${Seastar_DIR}")
 message(STATUS "Seastar version: ${Seastar_VERSION}")
 
 find_package(fmt 9 REQUIRED)
-
-# ---- Paths ----
-set(SHUNYA_SRC_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/src")
-set(SHUNYA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-set(SHUNYA_TEST_DIR    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 
 # ---- proto_helpers lib ----
 add_library(proto_helpers STATIC
