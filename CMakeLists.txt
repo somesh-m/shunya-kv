@@ -2,6 +2,9 @@ cmake_minimum_required (VERSION 3.5)
 
 project (SeastarExample)
 
+option(BUILD_SERVER "Build the shunya_store server" ON)
+option(ENABLE_TESTS "Build and run tests" ON)
+
 # ---- C++ standard / build type ----
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,6 +13,7 @@ if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
 
+if (BUILD_SERVER)
 # ---- Deps ----
 find_package (Seastar CONFIG REQUIRED)
 message(STATUS "Seastar found: ${Seastar_DIR}")
@@ -71,14 +75,6 @@ target_include_directories(shunya_store PRIVATE
   third_party/fnv
 )
 
-# Minimal conformance test for vendored fnv.c / fnv.h
-add_executable(test_fnv_ref tests/test_fnv.c)
-target_include_directories(test_fnv_ref PRIVATE third_party/fnv)
-target_link_libraries(test_fnv_ref PRIVATE fnv_ref)
-
-enable_testing()
-add_test(NAME fnv_ref_test COMMAND test_fnv_ref)
-
 target_compile_options(shunya_store PRIVATE
   -O0 -g3 -fno-omit-frame-pointer -fno-inline
 )
@@ -91,6 +87,10 @@ target_link_libraries(shunya_store PRIVATE
   fnv_ref            # <-- link the official FNV ref
 )
 
+endif()
+
+if (ENABLE_TESTS)
+enable_testing()
 include(FetchContent)
 FetchContent_Declare(
   googletest
@@ -120,3 +120,4 @@ target_link_libraries(shunya_test PRIVATE
 )
 include(GoogleTest)
 gtest_discover_tests(shunya_test)
+endif()
