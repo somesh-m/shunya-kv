@@ -20,6 +20,7 @@ def hex64(h: int) -> str:
 async def discover_map(host: str, probe_port: int, timeout: float = 2.0):
     r, w = await asyncio.wait_for(asyncio.open_connection(host, probe_port), timeout=timeout)
     # Your server uses NODE_INFO
+    print("Performing Discovery")
     w.write(b"NODE_INFO\r\n"); await w.drain()
     line = await asyncio.wait_for(r.readline(), timeout=timeout)
     w.close()
@@ -255,7 +256,7 @@ async def main():
     ap.add_argument("--port", type=int, default=60111,
                     help="single port OR ANY data-shard port for discovery (MAP)")
     ap.add_argument("--conns", type=int, default=64)
-    ap.add_argument("-- ", type=int, default=1)
+    ap.add_argument("--pipeline", type=int, default=1)
     ap.add_argument("--duration", type=int, default=120, help="MEASUREMENT window (sec)")
     ap.add_argument("--warmup", type=int, default=20, help="Warm-up to ignore (sec)")
     ap.add_argument("--keyspace", type=int, default=100000)
@@ -328,7 +329,7 @@ async def main():
 
     print(f"\nTotal runtime: {elapsed_total:.2f}s (ignored first {args.warmup}s)")
     print(f"Ops (measured): {total_ops:,}  Time: {measured_secs:.2f}s  Throughput: {tput:,.0f} ops/s")
-    print(f"Latency ms: p50={pct(all_lat,50):.2f}  p95={pct(all_lat,95):.2f}  p99={pct(all_lat,99):.2f}  max={max(all_lat):.2f}")
+    print(f"Latency ms: p50={pct(all_lat,50):.2f}  p95={pct(all_lat,95):.2f}  p99={pct(all_lat,99):.2f}  p99.9={pct(all_lat,99.9):.2f}  max={max(all_lat):.2f}")
 
 if __name__ == "__main__":
     try:

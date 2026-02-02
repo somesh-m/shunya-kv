@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 
+static seastar::logger get_logger{"cmd_get"};
 namespace shunyakv {
 
 seastar::future<> handle_get(std::string_view args,
@@ -31,7 +32,7 @@ seastar::future<> handle_get(std::string_view args,
     // check if correct shard
     const unsigned sid = shard_for(key_sv);
     if (sid != seastar::this_shard_id()) {
-        std::cout << "GET WRONGSHARD\n";
+        get_logger.info("GET WRONGSHARD");
         co_await out.write("WRONGSHARD\r\n"); // or MOVED-CORE like below
         co_return;
     }
@@ -44,7 +45,7 @@ seastar::future<> handle_get(std::string_view args,
         co_await out.write(val->data(), val->size());
         co_await out.write("\r\n");
     } else {
-        std::cout << "NOT_FOUND\n";
+        get_logger.info("NOT_FOUND");
         co_await out.write("NOT_FOUND\r\n");
     }
 

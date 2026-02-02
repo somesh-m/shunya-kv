@@ -9,6 +9,7 @@
 #include <seastar/net/api.hh>
 #include <string_view> // not <string_value>
 
+// static seastar::logger store_logger{"store"};
 namespace shunyakv {
 
 // inline unsigned shard_for(std::string_view key) {
@@ -20,8 +21,8 @@ namespace shunyakv {
 class service {
   public:
     seastar::future<> start() {
-        std::cout << "Starting store on shard " << seastar::this_shard_id()
-                  << "\n";
+        // store_logger.info("Starting store on shard {}",
+        //                   seastar::this_shard_id());
         return _store.start(seastar::this_shard_id());
     }
 
