@@ -31,7 +31,9 @@ seastar::future<> handle_set(std::string_view args,
     // check if correct shard
     unsigned sid = shard_for(key_sv);
     if (sid != seastar::this_shard_id()) {
-        set_logger.info("SET WRONGSHARD \n");
+        set_logger.info(
+            "WRONGSHARD: Trying to set {} on shard {}. Expected Shard {} \n",
+            key_sv, seastar::this_shard_id(), sid);
         co_await out.write("WRONGSHARD\r\n"); // or MOVED-CORE like below
         co_return;
     }
@@ -52,8 +54,10 @@ seastar::future<> handle_set(std::string_view args,
 
     if (ok) {
         co_await out.write("STORED\r\n");
+        set_logger.info("STORED {}", key_sv);
     } else {
         co_await out.write("NOT_STORED\r\n");
+        set_logger.info("NOT STORED {}", key_sv);
     }
 
     co_return;

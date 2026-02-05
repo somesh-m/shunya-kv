@@ -12,7 +12,9 @@ struct node_cfg {
     unsigned port_offset{1};
     seastar::sstring hash{"fnv1a435345"};
     uint64_t epoch{1};
+    bool isPreHashed{false};
 };
+inline node_cfg g_cfg;
 
 struct hash_range {
     uint64_t lo; // inclusive

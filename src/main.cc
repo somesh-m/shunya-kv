@@ -39,6 +39,7 @@ seastar::future<> init() {
     cfg.smp = seastar::smp::count;
     cfg.port_offset = 1;
     cfg.hash = "fnv1a64";
+    cfg.isPreHashed = true;
     shunyakv::set_node_cfg(cfg);
 
     // TODO: Add logic to find free ports and assign to shards
@@ -94,11 +95,18 @@ int main(int argc, char **argv) {
 seastar::future<> accept_forever(seastar::server_socket listener, uint16_t port,
                                  seastar::abort_source &as) {
     try {
-        while (!as.abort_requested()) {
-            auto ar = co_await listener.accept();
-            m_log.info("Accepted on port {} -> shard {} from {}", port,
-                       seastar::this_shard_id(), ar.remote_address);
-        }
+        return seastar::do_with(
+            std::move(listener), std::move(port),
+            [](auto &listener, auto &port) {
+                return seastar::keep_doing([&listener, &port]() {
+                    return listener.accept().then(
+                        [&port](seastar::accept_result ar) {
+                            m_log.info(
+                                "Accepted on port {} -> shard {} from {}", port,
+                                seastar::this_shard_id(), ar.remote_address);
+                        });
+                });
+            });
     } catch (const seastar::abort_requested_exception &) {
         m_log.info("Accept loop on port {} aborted", port);
     } catch (const std::system_error &se) {
