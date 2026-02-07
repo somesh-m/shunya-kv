@@ -46,7 +46,7 @@ seastar::future<> handle_get(std::string_view args,
     if (val) {
         co_await out.write(val->data(), val->size());
         co_await out.write("\r\n");
-        get_logger.info("READ {}", key_sv);
+        // get_logger.info("READ {}", key_sv);
     } else {
         get_logger.info("NOT_FOUND. Trying to fetch {} from shard {}", key_sv,
                         seastar::this_shard_id());

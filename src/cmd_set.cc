@@ -54,7 +54,7 @@ seastar::future<> handle_set(std::string_view args,
 
     if (ok) {
         co_await out.write("STORED\r\n");
-        set_logger.info("STORED {}", key_sv);
+        // set_logger.info("STORED {}", key_sv);
     } else {
         co_await out.write("NOT_STORED\r\n");
         set_logger.info("NOT STORED {}", key_sv);
