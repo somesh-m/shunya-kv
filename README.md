@@ -37,7 +37,7 @@ All measurements were taken with the database operating entirely in memory, with
 - Keyspace size: 200,000 keys
 - Key distribution: Uniform random
 - Value size: Small, fixed
-- Workload type: GET-only
+- Workload type: GET & SET
 - Benchmark style: Fixed concurrency (inflight-controlled)
 
 ## Benchmark Results
