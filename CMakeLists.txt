@@ -66,6 +66,7 @@ set(SHUNYA_SOURCES
   # ${SHUNYA_SRC_DIR}/service.cc
   ${SHUNYA_SRC_DIR}/resp/resp_parser.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
+  ${SHUNYA_SRC_DIR}/ttl/ttl_cache.cc
 )
 
 
@@ -106,8 +107,9 @@ FetchContent_MakeAvailable(googletest)
 SET(TEST_SOURCES
   ${SHUNYA_TEST_DIR}/hashtest.cc
   ${SHUNYA_TEST_DIR}/test_hash_wrapper.cc
+  ${SHUNYA_TEST_DIR}/ttl_cache_test.cc
 )
-add_executable(shunya_test ${TEST_SOURCES})
+add_executable(shunya_test ${TEST_SOURCES} ${SHUNYA_SRC_DIR}/ttl/ttl_cache.cc)
 # Make sure tests can include your headers + vendored fnv
 target_include_directories(shunya_test PRIVATE
   ${SHUNYA_INCLUDE_DIR}        # e.g. include/hash_wrapper.hh
