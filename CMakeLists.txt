@@ -64,7 +64,10 @@ set(SHUNYA_SOURCES
   ${SHUNYA_SRC_DIR}/hash_wrapper.cc   # keep if you really have/need this C wrapper
   # ${SHUNYA_SRC_DIR}/metrics_logger.cc
   # ${SHUNYA_SRC_DIR}/service.cc
+  ${SHUNYA_SRC_DIR}/resp/resp_parser.cc
+  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
+
 
 if (BUILD_SERVER)
 add_executable(shunya_store ${SHUNYA_SOURCES})

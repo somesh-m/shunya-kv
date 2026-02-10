@@ -1,7 +1,9 @@
 #include "cmd_get.hh"
 #include "commands.hh"
-#include "proto_helpers.hh" // split_first, trim
-#include "router.hh"        // shard_for(), service
+#include "router.hh" // shard_for(), service
+
+#include <resp/resp_types.hh>
+#include <resp/resp_writer.hh>
 
 #include <hash.hh>
 #include <optional>
@@ -9,48 +11,50 @@
 #include <seastar/core/iostream.hh>
 #include <seastar/util/log.hh>
 #include <string>
-#include <string_view>
 
 static seastar::logger get_logger{"cmd_get"};
+
 namespace shunyakv {
 
-seastar::future<> handle_get(std::string_view args,
+seastar::future<> handle_get(const resp::Array &cmd,
                              seastar::output_stream<char> &out,
                              shunyakv::service &store) {
-    using shunyakv::proto::split_first;
-    using shunyakv::proto::trim;
-
-    // Parse: GET <key>
-    auto [key_sv, _rest] = split_first(args);
-    key_sv = trim(key_sv);
-
-    if (key_sv.empty()) {
-        co_await out.write("CLIENT_ERROR missing key\r\n");
+    // cmd[0] == "GET"
+    if (cmd.size() != 2) {
+        co_await resp::write_error(out,
+                                   "ERR wrong number of arguments for 'GET'");
         co_return;
     }
 
-    // check if correct shard
-    const unsigned sid = shard_for(key_sv);
+    const auto &key = cmd[1];
+    if (key.empty()) {
+        co_await resp::write_error(out, "ERR empty key");
+        co_return;
+    }
+
+    // Check shard
+    const unsigned sid = shard_for(std::string_view(key.data(), key.size()));
     if (sid != seastar::this_shard_id()) {
-        get_logger.info(
-            "WRONGSHARD: Trying to get {} on shard {}. Expected Shard {} \n",
-            key_sv, seastar::this_shard_id(), sid);
-        co_await out.write("WRONGSHARD\r\n"); // or MOVED-CORE like below
+        get_logger.info("WRONGSHARD: get {} on shard {} expected {}", key,
+                        seastar::this_shard_id(), sid);
+        co_await resp::write_error(out, "WRONGSHARD");
         co_return;
     }
 
-    // Cross-shard safe: return std::string from the owner shard
+    // Fetch from owner shard (local)
     std::optional<std::string> val =
-        co_await store.local_get(std::string(key_sv));
+        co_await store.local_get(std::string(key.data(), key.size()));
 
     if (val) {
-        co_await out.write(val->data(), val->size());
-        co_await out.write("\r\n");
-        // get_logger.info("READ {}", key_sv);
+        // RESP bulk string reply
+        co_await resp::write_bulk(out,
+                                  seastar::sstring(val->data(), val->size()));
+        // (or if you change service to return sstring, you can avoid this copy)
     } else {
-        get_logger.info("NOT_FOUND. Trying to fetch {} from shard {}", key_sv,
-                        seastar::this_shard_id());
-        co_await out.write("NOT_FOUND\r\n");
+        // RESP null bulk for misses (redis-cli expects this)
+        co_await resp::write_null(out);
+        // Optional debug:
+        // get_logger.debug("NOT_FOUND {}", key);
     }
 
     co_return;

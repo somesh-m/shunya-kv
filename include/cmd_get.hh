@@ -1,8 +1,9 @@
 #pragma once
 #include "commands.hh"
+#include <resp/resp_types.hh>
 
 namespace shunyakv {
-seastar::future<> handle_get(std::string_view args,
+seastar::future<> handle_get(const resp::Array &cmd,
                              seastar::output_stream<char> &out,
                              shunyakv::service &svc);
 }

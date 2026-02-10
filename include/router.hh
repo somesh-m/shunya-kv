@@ -33,6 +33,11 @@ class service {
         key_t k{key.data(), key.size()}; // sstring on this shard
         return _store.set(std::move(k), std::move(value));
     }
+    seastar::future<bool> local_set(std::string key, std::string value,
+                                    uint64_t ttl) {
+        key_t k{key.data(), key.size()}; // sstring on this shard
+        return _store.set_with_ttl(std::move(k), std::move(value), ttl);
+    }
     seastar::future<std::optional<std::string>>
     local_get(const std::string &key) const {
         key_t k{key.data(), key.size()};

@@ -19,6 +19,9 @@
 #include <sys/syscall.h> // SYS_gettid
 #include <unistd.h>      // syscall, write, close
 
+#include <resp/resp_parser.hh>
+#include <resp/resp_writer.hh>
+
 using namespace seastar;
 
 static logger s_log{"server"};
@@ -36,63 +39,31 @@ future<> tcp_server::handle_session(connected_socket s, socket_address peer,
     auto in = input_stream<char>(s.input());
     auto out = output_stream<char>(s.output());
 
-    size_t pending_bytes = 0;
-    unsigned pending_replies = 0;
-
-    static constexpr size_t FLUSH_BYTES = 64 * 1024; // tune
-    static constexpr unsigned FLUSH_EVERY = 256;     // tune
-
     bool done = false;
-    seastar::sstring carry; // holds leftover bytes after the last newline
+    resp::Reader reader;
 
     try {
-        // co_await out.write("OK\r\n");
-        // co_await out.flush();
 
         while (!done) {
-            // Fill 'carry' until we see a '\n' or the peer closes
-            while (carry.find('\n') == seastar::sstring::npos) {
-                auto chunk =
-                    co_await in.read(); // returns temporary_buffer<char>
-                if (chunk.empty()) {
-                    // connection closed; if no complete line, exit
-                    if (carry.empty()) {
-                        co_return;
-                    }
-                    // no newline but leftover data: treat it as a final
-                    // line
-                    carry.append("\n", 1);
-                    break;
-                }
-                carry.append(chunk.get(), chunk.size());
+
+            // Read one RESP command
+            auto cmd = co_await reader.read_command(in);
+
+            if (cmd.empty()) {
+                co_return;
             }
 
-            // Extract one line
-            auto nl = carry.find('\n');
-            seastar::sstring line = carry.substr(0, nl);
-            carry.erase(carry.begin(),
-                        carry.begin() + nl + 1); // keep remaining data
-
-            // Trim CR and spaces
-            std::string_view sv{line.data(), line.size()};
-            sv = shunyakv::proto::trim(sv);
-            if (sv.empty()) {
-                continue;
-            }
-
-            auto [cmd_sv, rest_sv] = shunyakv::proto::split_first(sv);
-            auto cmdU = shunyakv::proto::to_upper(cmd_sv);
+            auto cmdU = shunyakv::proto::to_upper(cmd[0]);
 
             const auto &table = command_dispatch();
             auto it = table.find(cmdU);
             if (it == table.end()) {
-                co_await out.write("ERR unknown command\r\n");
+                co_await resp::write_error(out, "ERR unknown command");
                 co_await out.flush();
                 continue;
             }
 
-            // Dispatch to handler
-            co_await it->second(rest_sv, out, store);
+            co_await it->second(cmd, out, store);
 
             if (cmdU == "QUIT") {
                 done = true;

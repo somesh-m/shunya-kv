@@ -19,6 +19,13 @@ seastar::future<bool> store::set(key_t key, std::string value) {
     co_return true;
 }
 
+seastar::future<bool> store::set_with_ttl(key_t key, std::string value,
+                                          uint64_t ttl) {
+    // convert std::string -> sstring on the *owner shard*
+    _map[std::move(key)] = seastar::sstring(value.data(), value.size());
+    co_return true;
+}
+
 seastar::future<std::optional<std::string>> store::get(const key_t &key) const {
     auto it = _map.find(key);
     if (it == _map.end()) {

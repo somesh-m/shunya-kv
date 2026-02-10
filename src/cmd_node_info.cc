@@ -1,14 +1,15 @@
 #include "cmd_node_info.hh"
 #include "commands.hh"
-#include "proto_helpers.hh" // split_first, trim
+
+#include <resp/resp_types.hh>
+#include <resp/resp_writer.hh>
 #include <seastar/core/print.hh>
 
 namespace shunyakv {
+
 node_cfg g_node_cfg{}; // single definition
 
-void set_node_cfg(const node_cfg &c) {
-    g_node_cfg = c; // copy
-}
+void set_node_cfg(const node_cfg &c) { g_node_cfg = c; }
 
 std::vector<hash_range> compute_hash_ranges() {
     std::vector<hash_range> v;
@@ -30,14 +31,9 @@ std::vector<hash_range> compute_hash_ranges() {
         const __uint128_t lo128 = (SPACE * i) / D;
         const __uint128_t hi128 = (SPACE * (i + 1)) / D - 1;
 
-        // If shard 0 is admin-only (first_sid==1), data ports are base+sid.
-        // If you ever allow shard 0 as data, ensure admin uses a different
-        // base.
         const uint32_t port32 =
             static_cast<uint32_t>(g_node_cfg.base_port) + sid;
-        if (port32 > 65535) {
-            // handle error (throw/log) – port out of range
-        }
+        // TODO: validate port32 <= 65535 if you want strictness
 
         v.push_back(hash_range{static_cast<uint64_t>(lo128),
                                static_cast<uint64_t>(hi128), sid,
@@ -46,29 +42,48 @@ std::vector<hash_range> compute_hash_ranges() {
     return v;
 }
 
-seastar::future<> handle_node_info(std::string_view args,
+static bool ieq(const seastar::sstring &a, const char *b) {
+    if (a.size() != std::strlen(b))
+        return false;
+    for (size_t i = 0; i < a.size(); i++) {
+        char ca = a[i];
+        char cb = b[i];
+        if ('a' <= ca && ca <= 'z')
+            ca = char(ca - 'a' + 'A');
+        if ('a' <= cb && cb <= 'z')
+            cb = char(cb - 'a' + 'A');
+        if (ca != cb)
+            return false;
+    }
+    return true;
+}
+
+seastar::future<> handle_node_info(const resp::Array &cmd,
                                    seastar::output_stream<char> &out,
-                                   shunyakv::service &svc) {
+                                   shunyakv::service & /*svc*/) {
     using seastar::format;
 
-    // trim spaces in args
-    auto ltrim = [](std::string_view s) {
-        while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
-            s.remove_prefix(1);
-        return s;
-    };
-    auto rtrim = [](std::string_view s) {
-        while (!s.empty() && (s.back() == ' ' || s.back() == '\t' ||
-                              s.back() == '\r' || s.back() == '\n'))
-            s.remove_suffix(1);
-        return s;
-    };
-    auto cmd = rtrim(ltrim(args));
+    // Accept:
+    //  NODE_INFO               -> minimal
+    //  NODE_INFO RANGES|MAP    -> include ranges
+    if (cmd.size() != 1 && cmd.size() != 2) {
+        co_await resp::write_error(
+            out, "ERR wrong number of arguments for 'NODE_INFO'");
+        co_return;
+    }
+
+    bool want_ranges = false;
+    if (cmd.size() == 2) {
+        // Treat any second arg "RANGES" or "MAP" as request for ranges
+        if (ieq(cmd[1], "RANGES") || ieq(cmd[1], "MAP")) {
+            want_ranges = true;
+        } else {
+            co_await resp::write_error(out, "ERR syntax error");
+            co_return;
+        }
+    }
 
     seastar::sstring json;
-
-    const bool want_ranges =
-        !(cmd == "NODE_INFO" || cmd == "node_info"); // default MAP
 
     if (want_ranges) {
         auto ranges = compute_hash_ranges();
@@ -92,7 +107,9 @@ seastar::future<> handle_node_info(std::string_view args,
             g_node_cfg.port_offset, g_node_cfg.hash);
     }
 
-    json += "\r\n";
-    return out.write(json).then([&out] { return out.flush(); });
+    // Reply as RESP bulk string
+    co_await resp::write_bulk(out, json);
+    co_return;
 }
+
 } // namespace shunyakv
