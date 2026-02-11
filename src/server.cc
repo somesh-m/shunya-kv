@@ -79,48 +79,57 @@ future<> tcp_server::handle_session(connected_socket s, socket_address peer,
 seastar::future<> tcp_server::start() {
     _running = true;
     static seastar::abort_source _as;
-    static seastar::gate _gate;
+
     const auto sid = seastar::this_shard_id();
     const uint16_t port = static_cast<uint16_t>(_port + sid);
 
     seastar::listen_options lo;
-    lo.reuse_address = true; // safer for quick restarts
+    lo.reuse_address = true;
 
     auto listener =
         seastar::listen(seastar::make_ipv4_address({"0.0.0.0", port}), lo);
     s_log.info("Listening on port {} shard {}", port, sid);
 
-    try {
-        while (!_as.abort_requested()) {
-            // co_await accept with abort support; yields the reactor
-            auto ar = co_await listener.accept();
-
-            // capture what you need before moving
-            auto peer = ar.remote_address;
-            auto &store = _store.local();
-
-            ar.connection.set_nodelay(true);
-
-            // spawn a fiber for this session, tracked by the gate
-            (void)seastar::with_gate(_gate, [this,
-                                             conn = std::move(ar.connection),
-                                             peer = std::move(peer),
-                                             &store]() mutable {
-                (void)handle_session(std::move(conn), std::move(peer), store);
-            });
+    return seastar::repeat([this, listener = std::move(listener), port,
+                            sid]() mutable {
+        if (_as.abort_requested()) {
+            s_log.info("Accept loop aborted on port {} shard {}", port, sid);
+            return seastar::make_ready_future<seastar::stop_iteration>(
+                seastar::stop_iteration::yes);
         }
-    } catch (const seastar::abort_requested_exception &) {
-        s_log.info("Accept loop aborted on port {} shard {}", port, sid);
-    } catch (const std::system_error &se) {
-        s_log.error("Accept loop error on port {} shard {}: {} ({})", port, sid,
-                    se.code().message(), se.code().value());
-    } catch (const std::exception &e) {
-        s_log.error("Accept loop error on port {} shard {}: {}", port, sid,
-                    e.what());
-    }
 
-    // listener destroyed here (closes socket)
-    co_return;
+        return listener.accept()
+            .then([this](seastar::accept_result ar) {
+                auto peer = ar.remote_address;
+                auto &store = _store.local();
+
+                ar.connection.set_nodelay(true);
+
+                (void)handle_session(std::move(ar.connection), std::move(peer),
+                                     store)
+                    .handle_exception([](std::exception_ptr) {
+                        return seastar::make_ready_future<>();
+                    });
+
+                return seastar::make_ready_future<seastar::stop_iteration>(
+                    seastar::stop_iteration::no);
+            })
+            .handle_exception([port, sid](std::exception_ptr ep) {
+                try {
+                    std::rethrow_exception(ep);
+                } catch (const std::system_error &se) {
+                    s_log.error(
+                        "Accept loop error on port {} shard {}: {} ({})", port,
+                        sid, se.code().message(), se.code().value());
+                } catch (const std::exception &e) {
+                    s_log.error("Accept loop error on port {} shard {}: {}",
+                                port, sid, e.what());
+                }
+                // continue loop even after accept errors
+                return seastar::make_ready_future<seastar::stop_iteration>(
+                    seastar::stop_iteration::no);
+            });
+    });
 }
 
 future<> tcp_server::stop() {
