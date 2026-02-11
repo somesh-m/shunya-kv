@@ -106,7 +106,7 @@ seastar::future<> tcp_server::start() {
                                              conn = std::move(ar.connection),
                                              peer = std::move(peer),
                                              &store]() mutable {
-                return handle_session(std::move(conn), std::move(peer), store);
+                (void)handle_session(std::move(conn), std::move(peer), store);
             });
         }
     } catch (const seastar::abort_requested_exception &) {
