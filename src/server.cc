@@ -81,7 +81,7 @@ seastar::future<> tcp_server::start() {
     static seastar::abort_source _as;
 
     const auto sid = seastar::this_shard_id();
-    const uint16_t port = static_cast<uint16_t>(_port + sid);
+    const uint16_t port = static_cast<uint16_t>(_port);
 
     seastar::listen_options lo;
     lo.reuse_address = true;

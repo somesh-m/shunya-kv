@@ -8,11 +8,23 @@
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
 #include <seastar/core/iostream.hh>
+#include <seastar/core/smp.hh>
 #include <string>
 
 static seastar::logger set_logger{"cmd_set"};
 
 namespace shunyakv {
+namespace {
+
+seastar::future<bool> set_key_value(shunyakv::service &store, std::string key,
+                                    std::string value, uint64_t ttl_ms) {
+    if (ttl_ms == 0) {
+        return store.local_set(std::move(key), std::move(value));
+    }
+    return store.local_set(std::move(key), std::move(value), ttl_ms);
+}
+
+} // namespace
 
 static bool ieq(const seastar::sstring &a, const char *b) {
     // simple ASCII case-insensitive compare for tiny tokens like "EX"
@@ -75,24 +87,20 @@ seastar::future<> handle_set(const resp::Array &cmd,
     // Check shard
     unsigned sid =
         shunyakv::shard_for(std::string_view(key.data(), key.size()));
-    if (sid != seastar::this_shard_id()) {
-        set_logger.info("WRONGSHARD: set {} on shard {} expected {}", key,
-                        seastar::this_shard_id(), sid);
-        co_await resp::write_error(out, "WRONGSHARD");
-        co_return;
-    }
-
-    // Store set: update your service API to accept ttl_ms if you want TTL
+    std::string key_str(key.data(), key.size());
+    std::string value_str(value.data(), value.size());
     bool ok = false;
-    if (ttl_ms == 0) {
-        ok = co_await store.local_set(std::string(key.data(), key.size()),
-                                      std::string(value.data(), value.size()));
+    if (sid == seastar::this_shard_id()) {
+        ok = co_await set_key_value(store, std::move(key_str),
+                                    std::move(value_str), ttl_ms);
     } else {
-        // You likely want to add a local_set overload:
-        // local_set(key, value, ttl_ms)
-        ok = co_await store.local_set(std::string(key.data(), key.size()),
-                                      std::string(value.data(), value.size()),
-                                      ttl_ms);
+        ok = co_await seastar::smp::submit_to(
+            sid,
+            [&store, key_str = std::move(key_str),
+             value_str = std::move(value_str), ttl_ms]() mutable {
+                return set_key_value(store, std::move(key_str),
+                                     std::move(value_str), ttl_ms);
+            });
     }
 
     if (ok) {

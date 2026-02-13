@@ -1,0 +1,8 @@
+#pragma once
+#include <cstdint>
+#include <seastar/core/sstring.hh>
+
+struct db_config {
+    uint16_t db_port{60110};
+    seastar::sstring hash{"fnv1a64"};
+};

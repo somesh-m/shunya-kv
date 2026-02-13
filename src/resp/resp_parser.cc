@@ -1,6 +1,9 @@
 #include <resp/resp_parser.hh>
 
+#include <charconv>
+#include <cstring>
 #include <seastar/core/iostream.hh>
+#include <seastar/util/memory-data-source.hh>
 #include <stdexcept>
 #include <string>
 
@@ -12,6 +15,94 @@ using seastar::sstring;
 
 static inline void fail(const char *msg) {
     throw std::runtime_error(std::string("RESP error: ") + msg);
+}
+
+static frame_parse_status parse_int_crlf(std::string_view s, size_t &pos,
+                                         int64_t &out) {
+    const size_t start = pos;
+    const size_t cr = s.find('\r', start);
+    if (cr == std::string_view::npos) {
+        return frame_parse_status::need_more;
+    }
+    if (cr + 1 >= s.size()) {
+        return frame_parse_status::need_more;
+    }
+    if (s[cr + 1] != '\n') {
+        return frame_parse_status::invalid;
+    }
+
+    out = 0;
+    const auto [ptr, ec] =
+        std::from_chars(s.data() + start, s.data() + cr, out);
+    if (ec != std::errc{} || ptr != s.data() + cr) {
+        return frame_parse_status::invalid;
+    }
+
+    pos = cr + 2;
+    return frame_parse_status::ok;
+}
+
+frame_parse_status parse_frame_length(std::string_view s, size_t &frame_len) {
+    if (s.empty()) {
+        return frame_parse_status::need_more;
+    }
+    if (s.front() != '*') {
+        return frame_parse_status::invalid;
+    }
+
+    size_t pos = 1;
+    int64_t argc = 0;
+    auto st = parse_int_crlf(s, pos, argc);
+    if (st != frame_parse_status::ok) {
+        return st;
+    }
+    if (argc <= 0) {
+        return frame_parse_status::invalid;
+    }
+
+    for (int64_t i = 0; i < argc; ++i) {
+        if (pos >= s.size()) {
+            return frame_parse_status::need_more;
+        }
+        if (s[pos] != '$') {
+            return frame_parse_status::invalid;
+        }
+        ++pos;
+
+        int64_t bulk_len = 0;
+        st = parse_int_crlf(s, pos, bulk_len);
+        if (st != frame_parse_status::ok) {
+            return st;
+        }
+        if (bulk_len < 0) {
+            return frame_parse_status::invalid;
+        }
+
+        const size_t need = pos + static_cast<size_t>(bulk_len) + 2;
+        if (need > s.size()) {
+            return frame_parse_status::need_more;
+        }
+        if (s[pos + static_cast<size_t>(bulk_len)] != '\r' ||
+            s[pos + static_cast<size_t>(bulk_len) + 1] != '\n') {
+            return frame_parse_status::invalid;
+        }
+
+        pos = need;
+    }
+
+    frame_len = pos;
+    return frame_parse_status::ok;
+}
+
+future<Array> parse_command_from_frame(const seastar::sstring &frame) {
+    seastar::temporary_buffer<char> b(frame.size());
+    std::memcpy(b.get_write(), frame.data(), frame.size());
+    auto in = seastar::util::as_input_stream(std::move(b));
+
+    Reader r;
+    auto cmd = co_await r.read_command(in);
+    co_await in.close();
+    co_return cmd;
 }
 
 future<> Reader::ensure(seastar::input_stream<char> &in, size_t n) {

@@ -4,8 +4,15 @@
 #include <seastar/core/future.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/sstring.hh>
+#include <string_view>
 
 namespace resp {
+
+enum class frame_parse_status { ok, need_more, invalid };
+
+frame_parse_status parse_frame_length(std::string_view s, size_t &frame_len);
+
+seastar::future<Array> parse_command_from_frame(const seastar::sstring &frame);
 
 // Parser object holds buffered bytes across reads (per connection)
 class Reader {

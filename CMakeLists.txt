@@ -49,25 +49,13 @@ target_include_directories(proto_helpers PUBLIC ${SHUNYA_INCLUDE_DIR})
 # =========================================
 # Shunya store
 # =========================================
-set(SHUNYA_SOURCES
-  ${SHUNYA_SRC_DIR}/main.cc
-  ${SHUNYA_SRC_DIR}/server_debug.cc
-  ${SHUNYA_SRC_DIR}/server.cc
-  ${SHUNYA_SRC_DIR}/commands.cc
-  ${SHUNYA_SRC_DIR}/cmd_set.cc
-  ${SHUNYA_SRC_DIR}/cmd_get.cc
-  ${SHUNYA_SRC_DIR}/cmd_quit.cc
-  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
-  ${SHUNYA_SRC_DIR}/router.cc
-  ${SHUNYA_SRC_DIR}/kv_store.cc
-  ${SHUNYA_SRC_DIR}/hash.cc
-  ${SHUNYA_SRC_DIR}/hash_wrapper.cc   # keep if you really have/need this C wrapper
-  # ${SHUNYA_SRC_DIR}/metrics_logger.cc
-  # ${SHUNYA_SRC_DIR}/service.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_parser.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
-  ${SHUNYA_SRC_DIR}/ttl/ttl_cache.cc
+file(GLOB_RECURSE SHUNYA_SOURCES CONFIGURE_DEPENDS
+  "${SHUNYA_SRC_DIR}/*.cc"
 )
+
+# Keep currently disabled sources excluded from the server target.
+list(FILTER SHUNYA_SOURCES EXCLUDE REGEX ".*/metrics_logger\\.cc$")
+list(FILTER SHUNYA_SOURCES EXCLUDE REGEX ".*/service\\.cc$")
 
 
 if (BUILD_SERVER)

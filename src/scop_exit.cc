@@ -1,4 +1,3 @@
-#pragma once
 #include <functional>
 
 class scope_exit {

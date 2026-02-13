@@ -9,12 +9,21 @@
 #include <optional>
 #include <seastar/core/future.hh>
 #include <seastar/core/iostream.hh>
+#include <seastar/core/smp.hh>
 #include <seastar/util/log.hh>
 #include <string>
 
 static seastar::logger get_logger{"cmd_get"};
 
 namespace shunyakv {
+namespace {
+
+seastar::future<std::optional<std::string>>
+get_key_value(shunyakv::service &store, std::string key) {
+    return store.local_get(key);
+}
+
+} // namespace
 
 seastar::future<> handle_get(const resp::Array &cmd,
                              seastar::output_stream<char> &out,
@@ -34,16 +43,16 @@ seastar::future<> handle_get(const resp::Array &cmd,
 
     // Check shard
     const unsigned sid = shard_for(std::string_view(key.data(), key.size()));
-    if (sid != seastar::this_shard_id()) {
-        get_logger.info("WRONGSHARD: get {} on shard {} expected {}", key,
-                        seastar::this_shard_id(), sid);
-        co_await resp::write_error(out, "WRONGSHARD");
-        co_return;
+    std::string key_str(key.data(), key.size());
+    std::optional<std::string> val;
+    if (sid == seastar::this_shard_id()) {
+        val = co_await get_key_value(store, key_str);
+    } else {
+        val = co_await seastar::smp::submit_to(
+            sid, [&store, key_str = std::move(key_str)]() mutable {
+                return get_key_value(store, std::move(key_str));
+            });
     }
-
-    // Fetch from owner shard (local)
-    std::optional<std::string> val =
-        co_await store.local_get(std::string(key.data(), key.size()));
 
     if (val) {
         // RESP bulk string reply
