@@ -75,7 +75,7 @@ target_compile_options(shunya_store PRIVATE
 )
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
+  set(CMAKE_BUILD_TYPE Release CACHE STRING
       "Choose the type of build." FORCE)
 endif()
 target_compile_definitions(shunya_store PRIVATE -DSEASTAR_API_LEVEL=8)

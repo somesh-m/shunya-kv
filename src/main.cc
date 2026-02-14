@@ -10,6 +10,7 @@
 #include <seastar/core/reactor.hh>
 #include <seastar/core/sharded.hh>
 #include <seastar/core/sleep.hh>
+#include <seastar/core/smp.hh>
 #include <seastar/core/when_all.hh>
 #include <seastar/net/api.hh>
 
@@ -29,6 +30,65 @@ static logger m_log{"main"};
 seastar::future<> accept_forever(seastar::server_socket, uint16_t,
                                  seastar::abort_source &);
 seastar::future<> init();
+
+struct shard_shutdown_stats {
+    request_counters req;
+    request_latency_counters latency;
+};
+
+static seastar::future<> log_request_counters_on_shutdown() {
+    std::vector<seastar::future<shard_shutdown_stats>> futs;
+    futs.reserve(seastar::smp::count);
+    for (unsigned sid = 0; sid < seastar::smp::count; ++sid) {
+        futs.emplace_back(seastar::smp::submit_to(sid, [] {
+            auto &svc = shunyakv::local_service();
+            return shard_shutdown_stats{svc.snapshot_request_counters(),
+                                        svc.snapshot_request_latency_counters()};
+        }));
+    }
+
+    auto per_shard = co_await seastar::when_all_succeed(futs.begin(), futs.end());
+
+    uint64_t get_total = 0;
+    uint64_t get_forwarded = 0;
+    uint64_t set_total = 0;
+    uint64_t set_forwarded = 0;
+    request_latency_counters merged_latency;
+
+    for (unsigned sid = 0; sid < per_shard.size(); ++sid) {
+        const auto &c = per_shard[sid].req;
+        get_total += c.get_total;
+        get_forwarded += c.get_forwarded;
+        set_total += c.set_total;
+        set_forwarded += c.set_forwarded;
+        merged_latency.merge_from(per_shard[sid].latency);
+        m_log.info("shard {} request counters: GET total={} forwarded={} | SET "
+                   "total={} forwarded={}",
+                   sid, c.get_total, c.get_forwarded, c.set_total,
+                   c.set_forwarded);
+    }
+
+    m_log.info("cluster request counters: GET total={} forwarded={} | SET "
+               "total={} forwarded={}",
+               get_total, get_forwarded, set_total, set_forwarded);
+
+    const auto us_to_ms = [](uint64_t us) {
+        return static_cast<double>(us) / 1000.0;
+    };
+    const auto log_pct = [&](const char *label, const latency_histogram &h) {
+        m_log.info(
+            "{} n={} p50={:.3f}ms p90={:.3f}ms p99={:.3f}ms p99.9={:.3f}ms",
+            label, h.count, us_to_ms(h.quantile_us(0.50)),
+            us_to_ms(h.quantile_us(0.90)), us_to_ms(h.quantile_us(0.99)),
+            us_to_ms(h.quantile_us(0.999)));
+    };
+
+    log_pct("GET non-forwarded latency", merged_latency.get_non_forwarded);
+    log_pct("GET forwarded latency", merged_latency.get_forwarded);
+    log_pct("SET non-forwarded latency", merged_latency.set_non_forwarded);
+    log_pct("SET forwarded latency", merged_latency.set_forwarded);
+    co_return;
+}
 
 seastar::future<> init() {
     // Config block
@@ -68,7 +128,11 @@ seastar::future<> init() {
                         .handle_exception_type(
                             [](const seastar::sleep_aborted &) {});
                 })
-                .finally([&server] { return server.stop(); });
+                .finally([&server] {
+                    return server.stop().then([] {
+                        return log_request_counters_on_shutdown();
+                    });
+                });
         });
 }
 

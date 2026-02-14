@@ -10,6 +10,7 @@
 #include <seastar/core/iostream.hh>
 #include <seastar/core/smp.hh>
 #include <charconv>
+#include <chrono>
 #include <string>
 
 static seastar::logger set_logger{"cmd_set"};
@@ -83,13 +84,16 @@ seastar::future<> handle_set(const resp::Array &cmd,
         co_await resp::write_error(out, "ERR syntax error");
         co_return;
     }
+    const auto start = std::chrono::steady_clock::now();
 
     // Check shard
     unsigned sid =
         shunyakv::shard_for(std::string_view(key.data(), key.size()));
+    const bool forwarded = (sid != seastar::this_shard_id());
+    store.record_set(forwarded);
     seastar::sstring value_str(value.data(), value.size());
     bool ok = false;
-    if (sid == seastar::this_shard_id()) {
+    if (!forwarded) {
         ok = co_await set_key_value(store, key,
                                     std::move(value_str), ttl_ms);
     } else {
@@ -107,6 +111,11 @@ seastar::future<> handle_set(const resp::Array &cmd,
         co_await resp::write_error(out, "NOT STORED");
         set_logger.info("NOT STORED {}", key);
     }
+    const auto latency_us =
+        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                  std::chrono::steady_clock::now() - start)
+                                  .count());
+    store.record_set_latency(forwarded, latency_us);
 
     co_return;
 }

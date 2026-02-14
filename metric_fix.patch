@@ -1,0 +1,334 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7cf93dc..dc9e15b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -75,7 +75,7 @@ target_compile_options(shunya_store PRIVATE
+ )
+ 
+ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+-  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
++  set(CMAKE_BUILD_TYPE Release CACHE STRING
+       "Choose the type of build." FORCE)
+ endif()
+ target_compile_definitions(shunya_store PRIVATE -DSEASTAR_API_LEVEL=8)
+diff --git a/include/router.hh b/include/router.hh
+index 004fa1a..9843792 100644
+--- a/include/router.hh
++++ b/include/router.hh
+@@ -1,7 +1,11 @@
+ #pragma once
+ #include "kv_store.hh"
+ 
++#include <array>
++#include <cmath>
++#include <cstdint>
+ #include <functional> // std::hash
++#include <limits>
+ #include <optional>
+ #include <seastar/core/future.hh>
+ #include <seastar/core/smp.hh>              // smp::count, this_shard_id
+@@ -13,6 +17,82 @@
+ // static seastar::logger store_logger{"store"};
+ namespace shunyakv {
+ 
++struct request_counters {
++    uint64_t get_total{0};
++    uint64_t get_forwarded{0};
++    uint64_t set_total{0};
++    uint64_t set_forwarded{0};
++};
++
++struct latency_histogram {
++    static constexpr size_t kBuckets = 64;
++    std::array<uint64_t, kBuckets> buckets{};
++    uint64_t count{0};
++
++    void add_us(uint64_t us) noexcept {
++        ++count;
++        size_t idx = 0;
++        if (us != 0) {
++            idx = static_cast<size_t>(63 - __builtin_clzll(us));
++            if (idx >= kBuckets) {
++                idx = kBuckets - 1;
++            }
++        }
++        ++buckets[idx];
++    }
++
++    void merge_from(const latency_histogram &other) noexcept {
++        count += other.count;
++        for (size_t i = 0; i < kBuckets; ++i) {
++            buckets[i] += other.buckets[i];
++        }
++    }
++
++    uint64_t quantile_us(double q) const noexcept {
++        if (count == 0) {
++            return 0;
++        }
++        if (q < 0.0) {
++            q = 0.0;
++        }
++        if (q > 1.0) {
++            q = 1.0;
++        }
++
++        uint64_t rank =
++            static_cast<uint64_t>(std::ceil(q * static_cast<long double>(count)));
++        if (rank == 0) {
++            rank = 1;
++        }
++
++        uint64_t seen = 0;
++        for (size_t i = 0; i < kBuckets; ++i) {
++            seen += buckets[i];
++            if (seen >= rank) {
++                if (i >= 63) {
++                    return std::numeric_limits<uint64_t>::max();
++                }
++                return (uint64_t{1} << (i + 1)) - 1;
++            }
++        }
++        return std::numeric_limits<uint64_t>::max();
++    }
++};
++
++struct request_latency_counters {
++    latency_histogram get_non_forwarded;
++    latency_histogram get_forwarded;
++    latency_histogram set_non_forwarded;
++    latency_histogram set_forwarded;
++
++    void merge_from(const request_latency_counters &other) noexcept {
++        get_non_forwarded.merge_from(other.get_non_forwarded);
++        get_forwarded.merge_from(other.get_forwarded);
++        set_non_forwarded.merge_from(other.set_non_forwarded);
++        set_forwarded.merge_from(other.set_forwarded);
++    }
++};
++
+ // inline unsigned shard_for(std::string_view key) {
+ //     return static_cast<unsigned>(std::hash<std::string_view>{}(key) %
+ //                                  seastar::smp::count);
+@@ -46,8 +126,48 @@ class service {
+         return _store.get(k);
+     }
+ 
++    void record_get(bool forwarded) noexcept {
++        ++_req_counters.get_total;
++        if (forwarded) {
++            ++_req_counters.get_forwarded;
++        }
++    }
++
++    void record_set(bool forwarded) noexcept {
++        ++_req_counters.set_total;
++        if (forwarded) {
++            ++_req_counters.set_forwarded;
++        }
++    }
++
++    void record_get_latency(bool forwarded, uint64_t latency_us) noexcept {
++        if (forwarded) {
++            _latency_counters.get_forwarded.add_us(latency_us);
++        } else {
++            _latency_counters.get_non_forwarded.add_us(latency_us);
++        }
++    }
++
++    void record_set_latency(bool forwarded, uint64_t latency_us) noexcept {
++        if (forwarded) {
++            _latency_counters.set_forwarded.add_us(latency_us);
++        } else {
++            _latency_counters.set_non_forwarded.add_us(latency_us);
++        }
++    }
++
++    request_counters snapshot_request_counters() const noexcept {
++        return _req_counters;
++    }
++
++    request_latency_counters snapshot_request_latency_counters() const noexcept {
++        return _latency_counters;
++    }
++
+   private:
+     store _store;
++    request_counters _req_counters;
++    request_latency_counters _latency_counters;
+ };
+ 
+ inline service &local_service() {
+diff --git a/src/cmd_get.cc b/src/cmd_get.cc
+index d296f90..d987d2f 100644
+--- a/src/cmd_get.cc
++++ b/src/cmd_get.cc
+@@ -6,6 +6,7 @@
+ #include <resp/resp_writer.hh>
+ 
+ #include <hash.hh>
++#include <chrono>
+ #include <optional>
+ #include <seastar/core/future.hh>
+ #include <seastar/core/iostream.hh>
+@@ -40,11 +41,14 @@ seastar::future<> handle_get(const resp::Array &cmd,
+         co_await resp::write_error(out, "ERR empty key");
+         co_return;
+     }
++    const auto start = std::chrono::steady_clock::now();
+ 
+     // Check shard
+     const unsigned sid = shard_for(std::string_view(key.data(), key.size()));
++    const bool forwarded = (sid != seastar::this_shard_id());
++    store.record_get(forwarded);
+     std::optional<seastar::sstring> val;
+-    if (sid == seastar::this_shard_id()) {
++    if (!forwarded) {
+         val = co_await get_key_value(store, key);
+     } else {
+         val = co_await seastar::smp::submit_to(
+@@ -63,6 +67,11 @@ seastar::future<> handle_get(const resp::Array &cmd,
+         // Optional debug:
+         // get_logger.debug("NOT_FOUND {}", key);
+     }
++    const auto latency_us =
++        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
++                                  std::chrono::steady_clock::now() - start)
++                                  .count());
++    store.record_get_latency(forwarded, latency_us);
+ 
+     co_return;
+ }
+diff --git a/src/cmd_set.cc b/src/cmd_set.cc
+index 860a746..822408b 100644
+--- a/src/cmd_set.cc
++++ b/src/cmd_set.cc
+@@ -10,6 +10,7 @@
+ #include <seastar/core/iostream.hh>
+ #include <seastar/core/smp.hh>
+ #include <charconv>
++#include <chrono>
+ #include <string>
+ 
+ static seastar::logger set_logger{"cmd_set"};
+@@ -83,13 +84,16 @@ seastar::future<> handle_set(const resp::Array &cmd,
+         co_await resp::write_error(out, "ERR syntax error");
+         co_return;
+     }
++    const auto start = std::chrono::steady_clock::now();
+ 
+     // Check shard
+     unsigned sid =
+         shunyakv::shard_for(std::string_view(key.data(), key.size()));
++    const bool forwarded = (sid != seastar::this_shard_id());
++    store.record_set(forwarded);
+     seastar::sstring value_str(value.data(), value.size());
+     bool ok = false;
+-    if (sid == seastar::this_shard_id()) {
++    if (!forwarded) {
+         ok = co_await set_key_value(store, key,
+                                     std::move(value_str), ttl_ms);
+     } else {
+@@ -107,6 +111,11 @@ seastar::future<> handle_set(const resp::Array &cmd,
+         co_await resp::write_error(out, "NOT STORED");
+         set_logger.info("NOT STORED {}", key);
+     }
++    const auto latency_us =
++        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
++                                  std::chrono::steady_clock::now() - start)
++                                  .count());
++    store.record_set_latency(forwarded, latency_us);
+ 
+     co_return;
+ }
+diff --git a/src/main.cc b/src/main.cc
+index 6d96c6b..f8fd4d4 100644
+--- a/src/main.cc
++++ b/src/main.cc
+@@ -10,6 +10,7 @@
+ #include <seastar/core/reactor.hh>
+ #include <seastar/core/sharded.hh>
+ #include <seastar/core/sleep.hh>
++#include <seastar/core/smp.hh>
+ #include <seastar/core/when_all.hh>
+ #include <seastar/net/api.hh>
+ 
+@@ -30,6 +31,65 @@ seastar::future<> accept_forever(seastar::server_socket, uint16_t,
+                                  seastar::abort_source &);
+ seastar::future<> init();
+ 
++struct shard_shutdown_stats {
++    request_counters req;
++    request_latency_counters latency;
++};
++
++static seastar::future<> log_request_counters_on_shutdown() {
++    std::vector<seastar::future<shard_shutdown_stats>> futs;
++    futs.reserve(seastar::smp::count);
++    for (unsigned sid = 0; sid < seastar::smp::count; ++sid) {
++        futs.emplace_back(seastar::smp::submit_to(sid, [] {
++            auto &svc = shunyakv::local_service();
++            return shard_shutdown_stats{svc.snapshot_request_counters(),
++                                        svc.snapshot_request_latency_counters()};
++        }));
++    }
++
++    auto per_shard = co_await seastar::when_all_succeed(futs.begin(), futs.end());
++
++    uint64_t get_total = 0;
++    uint64_t get_forwarded = 0;
++    uint64_t set_total = 0;
++    uint64_t set_forwarded = 0;
++    request_latency_counters merged_latency;
++
++    for (unsigned sid = 0; sid < per_shard.size(); ++sid) {
++        const auto &c = per_shard[sid].req;
++        get_total += c.get_total;
++        get_forwarded += c.get_forwarded;
++        set_total += c.set_total;
++        set_forwarded += c.set_forwarded;
++        merged_latency.merge_from(per_shard[sid].latency);
++        m_log.info("shard {} request counters: GET total={} forwarded={} | SET "
++                   "total={} forwarded={}",
++                   sid, c.get_total, c.get_forwarded, c.set_total,
++                   c.set_forwarded);
++    }
++
++    m_log.info("cluster request counters: GET total={} forwarded={} | SET "
++               "total={} forwarded={}",
++               get_total, get_forwarded, set_total, set_forwarded);
++
++    const auto us_to_ms = [](uint64_t us) {
++        return static_cast<double>(us) / 1000.0;
++    };
++    const auto log_pct = [&](const char *label, const latency_histogram &h) {
++        m_log.info(
++            "{} n={} p50={:.3f}ms p90={:.3f}ms p99={:.3f}ms p99.9={:.3f}ms",
++            label, h.count, us_to_ms(h.quantile_us(0.50)),
++            us_to_ms(h.quantile_us(0.90)), us_to_ms(h.quantile_us(0.99)),
++            us_to_ms(h.quantile_us(0.999)));
++    };
++
++    log_pct("GET non-forwarded latency", merged_latency.get_non_forwarded);
++    log_pct("GET forwarded latency", merged_latency.get_forwarded);
++    log_pct("SET non-forwarded latency", merged_latency.set_non_forwarded);
++    log_pct("SET forwarded latency", merged_latency.set_forwarded);
++    co_return;
++}
++
+ seastar::future<> init() {
+     // Config block
+     static node_cfg cfg;
+@@ -68,7 +128,11 @@ seastar::future<> init() {
+                         .handle_exception_type(
+                             [](const seastar::sleep_aborted &) {});
+                 })
+-                .finally([&server] { return server.stop(); });
++                .finally([&server] {
++                    return server.stop().then([] {
++                        return log_request_counters_on_shutdown();
++                    });
++                });
+         });
+ }
+ 
