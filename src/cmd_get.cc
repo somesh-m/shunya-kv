@@ -18,8 +18,8 @@ static seastar::logger get_logger{"cmd_get"};
 namespace shunyakv {
 namespace {
 
-seastar::future<std::optional<std::string>>
-get_key_value(shunyakv::service &store, std::string key) {
+seastar::future<std::optional<seastar::sstring>>
+get_key_value(shunyakv::service &store, std::string_view key) {
     return store.local_get(key);
 }
 
@@ -43,21 +43,19 @@ seastar::future<> handle_get(const resp::Array &cmd,
 
     // Check shard
     const unsigned sid = shard_for(std::string_view(key.data(), key.size()));
-    std::string key_str(key.data(), key.size());
-    std::optional<std::string> val;
+    std::optional<seastar::sstring> val;
     if (sid == seastar::this_shard_id()) {
-        val = co_await get_key_value(store, key_str);
+        val = co_await get_key_value(store, key);
     } else {
         val = co_await seastar::smp::submit_to(
-            sid, [&store, key_str = std::move(key_str)]() mutable {
-                return get_key_value(store, std::move(key_str));
+            sid, [key = seastar::sstring(key)]() mutable {
+                return get_key_value(shunyakv::local_service(), key);
             });
     }
 
     if (val) {
         // RESP bulk string reply
-        co_await resp::write_bulk(out,
-                                  seastar::sstring(val->data(), val->size()));
+        co_await resp::write_bulk(out, *val);
         // (or if you change service to return sstring, you can avoid this copy)
     } else {
         // RESP null bulk for misses (redis-cli expects this)

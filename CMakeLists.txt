@@ -68,8 +68,16 @@ target_include_directories(shunya_store PRIVATE
 )
 
 target_compile_options(shunya_store PRIVATE
-  -O0 -g3 -fno-omit-frame-pointer -fno-inline
+  $<$<CONFIG:Debug>:-O0 -g3 -fno-omit-frame-pointer -fno-inline>
+  $<$<CONFIG:Release>:-O3 -g1>
+  $<$<CONFIG:RelWithDebInfo>:-O3 -g1 -fno-omit-frame-pointer>
+  $<$<CONFIG:MinSizeRel>:-Os -g0>
 )
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
+      "Choose the type of build." FORCE)
+endif()
 target_compile_definitions(shunya_store PRIVATE -DSEASTAR_API_LEVEL=8)
 
 target_link_libraries(shunya_store PRIVATE

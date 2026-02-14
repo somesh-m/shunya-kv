@@ -75,7 +75,9 @@ seastar::future<> PipelinedSocketHandler::write_loop(shunyakv::connection &c) {
             }
 
             co_await out.write(resp);
-            co_await out.flush();
+            if (_respq.empty()) {
+                co_await out.flush();
+            }
             _slots.signal(1);
         }
     } catch (...) {
@@ -84,6 +86,5 @@ seastar::future<> PipelinedSocketHandler::write_loop(shunyakv::connection &c) {
 }
 
 seastar::future<> PipelinedSocketHandler::process(shunyakv::connection &c) {
-    std::cout << "In process in new handler \n";
     co_await seastar::when_all(read_loop(c), write_loop(c));
 }

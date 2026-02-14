@@ -1,9 +1,7 @@
 #include <resp/resp_parser.hh>
 
 #include <charconv>
-#include <cstring>
 #include <seastar/core/iostream.hh>
-#include <seastar/util/memory-data-source.hh>
 #include <stdexcept>
 #include <string>
 
@@ -95,58 +93,112 @@ frame_parse_status parse_frame_length(std::string_view s, size_t &frame_len) {
 }
 
 future<Array> parse_command_from_frame(const seastar::sstring &frame) {
-    seastar::temporary_buffer<char> b(frame.size());
-    std::memcpy(b.get_write(), frame.data(), frame.size());
-    auto in = seastar::util::as_input_stream(std::move(b));
+    std::string_view s(frame.data(), frame.size());
 
-    Reader r;
-    auto cmd = co_await r.read_command(in);
-    co_await in.close();
-    co_return cmd;
+    if (s.empty() || s.front() != '*') {
+        fail("expected array '*'");
+    }
+    size_t pos = 1;
+
+    int64_t argc = 0;
+    auto st = parse_int_crlf(s, pos, argc);
+    if (st != frame_parse_status::ok || argc <= 0) {
+        fail("invalid array length");
+    }
+
+    static constexpr int64_t MAX_ARGS = 1024;
+    if (argc > MAX_ARGS) {
+        fail("too many arguments");
+    }
+
+    Array argv;
+    argv.reserve(size_t(argc));
+    for (int64_t i = 0; i < argc; ++i) {
+        if (pos >= s.size() || s[pos] != '$') {
+            fail("expected bulk string '$' in array");
+        }
+        ++pos;
+
+        int64_t len = 0;
+        st = parse_int_crlf(s, pos, len);
+        if (st != frame_parse_status::ok || len < 0) {
+            fail("invalid bulk length");
+        }
+
+        static constexpr int64_t MAX_BULK = 64 * 1024 * 1024;
+        if (len > MAX_BULK) {
+            fail("bulk string too large");
+        }
+
+        const size_t need = pos + static_cast<size_t>(len) + 2;
+        if (need > s.size() || s[pos + static_cast<size_t>(len)] != '\r' ||
+            s[pos + static_cast<size_t>(len) + 1] != '\n') {
+            fail("invalid bulk payload");
+        }
+
+        argv.emplace_back(s.substr(pos, static_cast<size_t>(len)));
+        pos = need;
+    }
+
+    co_return argv;
+}
+
+void Reader::compact_if_needed() {
+    if (_off == 0) {
+        return;
+    }
+    if (_off >= _buf.size()) {
+        _buf = {};
+        _off = 0;
+        return;
+    }
+    if (_off >= 4096 || _off * 2 >= _buf.size()) {
+        _buf = _buf.substr(_off);
+        _off = 0;
+    }
 }
 
 future<> Reader::ensure(seastar::input_stream<char> &in, size_t n) {
-    while (_buf.size() < n) {
-        auto chunk = co_await in.read(); // temporary_buffer<char>
+    while (size() < n) {
+        auto chunk = co_await in.read();
         if (chunk.empty()) {
-            // EOF
             co_return;
         }
+        compact_if_needed();
         _buf.append(chunk.get(), chunk.size());
     }
 }
 
 future<char> Reader::read_byte(seastar::input_stream<char> &in) {
     co_await ensure(in, 1);
-    if (_buf.empty()) {
-        // clean EOF
+    if (size() == 0) {
         co_return '\0';
     }
-    char c = _buf[0];
-    _buf.erase(_buf.begin(), _buf.begin() + 1);
-
+    const char c = _buf[_off];
+    ++_off;
+    compact_if_needed();
     co_return c;
 }
 
 future<sstring> Reader::read_line_crlf(seastar::input_stream<char> &in) {
-    // Read until "\r\n" and return the line excluding CRLF.
     while (true) {
-        auto pos = _buf.find("\r\n");
-        if (pos != sstring::npos) {
-            sstring line = _buf.substr(0, pos);
-            _buf.erase(_buf.begin(), _buf.begin() + pos + 2);
-
+        const auto sv = view();
+        const auto pos = sv.find("\r\n");
+        if (pos != std::string_view::npos) {
+            sstring line(sv.substr(0, pos));
+            _off += pos + 2;
+            compact_if_needed();
             co_return line;
         }
 
         auto chunk = co_await in.read();
         if (chunk.empty()) {
-            // EOF: if no buffered bytes -> signal clean close
-            if (_buf.empty()) {
+            if (size() == 0) {
                 co_return sstring{};
             }
             fail("unexpected EOF while reading line");
         }
+        compact_if_needed();
         _buf.append(chunk.get(), chunk.size());
     }
 }
@@ -154,92 +206,73 @@ future<sstring> Reader::read_line_crlf(seastar::input_stream<char> &in) {
 future<int64_t> Reader::read_int_line(seastar::input_stream<char> &in) {
     auto line = co_await read_line_crlf(in);
     if (line.empty()) {
-        // Could be clean close; caller decides if that's allowed
         co_return 0;
     }
-
-    // Convert to std::string for stoll (simple + safe)
-    try {
-        co_return std::stoll(std::string(line.data(), line.size()));
-    } catch (...) {
+    int64_t n = 0;
+    const auto [ptr, ec] =
+        std::from_chars(line.data(), line.data() + line.size(), n);
+    if (ec != std::errc{} || ptr != line.data() + line.size()) {
         fail("invalid integer");
     }
+    co_return n;
 }
 
 future<sstring> Reader::read_bulk(seastar::input_stream<char> &in) {
-    // '$' already consumed by caller
     auto len_line = co_await read_line_crlf(in);
     if (len_line.empty()) {
         fail("unexpected EOF reading bulk length");
     }
 
     int64_t len = 0;
-    try {
-        len = std::stoll(std::string(len_line.data(), len_line.size()));
-    } catch (...) {
+    const auto [ptr, ec] =
+        std::from_chars(len_line.data(), len_line.data() + len_line.size(), len);
+    if (ec != std::errc{} || ptr != len_line.data() + len_line.size()) {
         fail("invalid bulk length");
     }
 
     if (len == -1) {
-        // Null bulk string (allowed by RESP, but commands usually shouldn't use
-        // it)
         co_return sstring{};
     }
     if (len < 0) {
         fail("negative bulk length");
     }
 
-    // Optional safety limit (strongly recommended)
-    static constexpr int64_t MAX_BULK = 64 * 1024 * 1024; // 64MB
+    static constexpr int64_t MAX_BULK = 64 * 1024 * 1024;
     if (len > MAX_BULK) {
         fail("bulk string too large");
     }
 
-    // Need: <len bytes> + "\r\n"
     co_await ensure(in, size_t(len) + 2);
-    if (_buf.size() < size_t(len) + 2) {
+    if (size() < size_t(len) + 2) {
         fail("unexpected EOF reading bulk payload");
     }
 
-    sstring data = _buf.substr(0, size_t(len));
+    auto sv = view();
+    sstring data(sv.substr(0, size_t(len)));
 
-    if (_buf[size_t(len)] != '\r' || _buf[size_t(len) + 1] != '\n') {
+    if (sv[size_t(len)] != '\r' || sv[size_t(len) + 1] != '\n') {
         fail("missing CRLF after bulk payload");
     }
 
-    _buf.erase(_buf.begin(), _buf.begin() + size_t(len) + 2);
+    _off += size_t(len) + 2;
+    compact_if_needed();
 
     co_return data;
 }
 
 future<Array> Reader::read_command(seastar::input_stream<char> &in) {
-    // Expect: *<n>\r\n then n x $<len>\r\n<data>\r\n
-    char t = co_await read_byte(in); // returns exactly one byte
+    char t = co_await read_byte(in);
     if (t == '\0') {
-        // clean close
         co_return Array{};
     }
     if (t != '*') {
         fail("expected array '*'");
     }
 
-    auto n_line = co_await read_line_crlf(in);
-    if (n_line.empty()) {
-        fail("unexpected EOF reading array length");
-    }
-
-    int64_t n = 0;
-    try {
-        n = std::stoll(std::string(n_line.data(), n_line.size()));
-    } catch (...) {
-        fail("invalid array length");
-    }
-
+    const int64_t n = co_await read_int_line(in);
     if (n <= 0) {
         fail("array length must be positive");
     }
-
-    // Optional safety limit
     static constexpr int64_t MAX_ARGS = 1024;
     if (n > MAX_ARGS) {
         fail("too many arguments");

@@ -1,11 +1,11 @@
 #include "conn/resp_handler.hh"
 
 #include "commands.hh"
-#include "proto_helpers.hh"
 #include "resp/resp_parser.hh"
 #include "resp/resp_writer.hh"
 #include "router.hh"
 
+#include <algorithm>
 #include <string_view>
 #include <vector>
 #include <seastar/util/memory-data-sink.hh>
@@ -19,6 +19,26 @@ buffer_vector_to_sstring(std::vector<seastar::temporary_buffer<char>> &bufs) {
         out.append(b.get(), b.size());
     }
     return out;
+}
+
+bool ascii_ieq(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+        unsigned char ca = static_cast<unsigned char>(a[i]);
+        unsigned char cb = static_cast<unsigned char>(b[i]);
+        if ('a' <= ca && ca <= 'z') {
+            ca = static_cast<unsigned char>(ca - 'a' + 'A');
+        }
+        if ('a' <= cb && cb <= 'z') {
+            cb = static_cast<unsigned char>(cb - 'a' + 'A');
+        }
+        if (ca != cb) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -56,16 +76,17 @@ RespHandler::try_extract_request(seastar::sstring &buf) {
 }
 
 seastar::future<seastar::sstring> RespHandler::handle_request(seastar::sstring req) {
-    static thread_local shunyakv::service store;
     try {
         auto cmd = co_await resp::parse_command_from_frame(req);
         if (cmd.empty()) {
             co_return seastar::sstring("-ERR empty command\r\n");
         }
 
-        const auto cmd_u = shunyakv::proto::to_upper(cmd[0]);
         const auto &table = shunyakv::command_dispatch();
-        auto it = table.find(cmd_u);
+        const auto it = std::find_if(
+            table.begin(), table.end(), [&](const auto &entry) {
+                return ascii_ieq(cmd[0], entry.first);
+            });
         if (it == table.end()) {
             co_return seastar::sstring("-ERR unknown command\r\n");
         }
@@ -74,7 +95,7 @@ seastar::future<seastar::sstring> RespHandler::handle_request(seastar::sstring r
         seastar::output_stream<char> out(seastar::data_sink(
             std::make_unique<seastar::util::memory_data_sink>(bufs)));
 
-        co_await it->second(cmd, out, store);
+        co_await it->second(cmd, out, shunyakv::local_service());
         co_await out.flush();
         co_await out.close();
         co_return buffer_vector_to_sstring(bufs);

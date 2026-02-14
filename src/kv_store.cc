@@ -13,27 +13,24 @@ seastar::future<> store::stop() {
     co_return;
 }
 
-seastar::future<bool> store::set(key_t key, std::string value) {
-    // convert std::string -> sstring on the *owner shard*
-    _map[std::move(key)] = seastar::sstring(value.data(), value.size());
+seastar::future<bool> store::set(key_t key, seastar::sstring value) {
+    _map[std::move(key)] = std::move(value);
     co_return true;
 }
 
-seastar::future<bool> store::set_with_ttl(key_t key, std::string value,
+seastar::future<bool> store::set_with_ttl(key_t key, seastar::sstring value,
                                           uint64_t ttl) {
-    // convert std::string -> sstring on the *owner shard*
-    _map[std::move(key)] = seastar::sstring(value.data(), value.size());
+    _map[std::move(key)] = std::move(value);
     co_return true;
 }
 
-seastar::future<std::optional<std::string>> store::get(const key_t &key) const {
+seastar::future<std::optional<seastar::sstring>>
+store::get(const key_t &key) const {
     auto it = _map.find(key);
     if (it == _map.end()) {
         co_return std::nullopt;
     }
-    const seastar::sstring &s = it->second;
-    co_return std::optional<std::string>(
-        std::string(s.data(), s.size())); // safe across shards
+    co_return std::optional<seastar::sstring>(it->second);
 }
 
 } // namespace shunyakv

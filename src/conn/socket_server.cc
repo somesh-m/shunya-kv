@@ -66,12 +66,10 @@ future<> socket_server::do_accept_one(int which, bool tls) {
     return _listeners[which]
         .accept()
         .then([this, tls](accept_result ar) mutable {
-            socket_logger.info("data received\n");
             auto handler = _handler_factory ? _handler_factory() : nullptr;
             if (!handler) {
                 throw std::runtime_error("No handler configured");
             }
-            socket_logger.info("fetched handler");
             if (_keepalive_params) {
                 ar.connection.set_keepalive(true);
                 ar.connection.set_keepalive_parameters(

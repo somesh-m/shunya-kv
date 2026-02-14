@@ -23,6 +23,13 @@ class Reader {
 
   private:
     seastar::sstring _buf;
+    size_t _off{0};
+
+    void compact_if_needed();
+    size_t size() const { return _buf.size() - _off; }
+    std::string_view view() const {
+        return std::string_view(_buf.data() + _off, size());
+    }
 
     seastar::future<> ensure(seastar::input_stream<char> &in, size_t n);
     seastar::future<char> read_byte(seastar::input_stream<char> &in);

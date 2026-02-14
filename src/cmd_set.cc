@@ -9,6 +9,7 @@
 #include <seastar/core/future.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/smp.hh>
+#include <charconv>
 #include <string>
 
 static seastar::logger set_logger{"cmd_set"};
@@ -16,8 +17,9 @@ static seastar::logger set_logger{"cmd_set"};
 namespace shunyakv {
 namespace {
 
-seastar::future<bool> set_key_value(shunyakv::service &store, std::string key,
-                                    std::string value, uint64_t ttl_ms) {
+seastar::future<bool> set_key_value(shunyakv::service &store,
+                                    std::string_view key,
+                                    seastar::sstring value, uint64_t ttl_ms) {
     if (ttl_ms == 0) {
         return store.local_set(std::move(key), std::move(value));
     }
@@ -68,17 +70,15 @@ seastar::future<> handle_set(const resp::Array &cmd,
             co_await resp::write_error(out, "ERR syntax error (expected EX)");
             co_return;
         }
-        try {
-            auto n = std::stoll(std::string(cmd[4].data(), cmd[4].size()));
-            if (n <= 0) {
-                co_await resp::write_error(out, "ERR invalid expire time");
-                co_return;
-            }
-            ttl_ms = static_cast<uint64_t>(n);
-        } catch (...) {
-            resp::write_error(out, "ERR invalid expire time");
+        uint64_t n = 0;
+        const auto [ptr, ec] =
+            std::from_chars(cmd[4].data(), cmd[4].data() + cmd[4].size(), n);
+        if (ec != std::errc{} || ptr != cmd[4].data() + cmd[4].size() ||
+            n == 0) {
+            co_await resp::write_error(out, "ERR invalid expire time");
             co_return;
         }
+        ttl_ms = n;
     } else if (cmd.size() != 3) {
         co_await resp::write_error(out, "ERR syntax error");
         co_return;
@@ -87,19 +87,17 @@ seastar::future<> handle_set(const resp::Array &cmd,
     // Check shard
     unsigned sid =
         shunyakv::shard_for(std::string_view(key.data(), key.size()));
-    std::string key_str(key.data(), key.size());
-    std::string value_str(value.data(), value.size());
+    seastar::sstring value_str(value.data(), value.size());
     bool ok = false;
     if (sid == seastar::this_shard_id()) {
-        ok = co_await set_key_value(store, std::move(key_str),
+        ok = co_await set_key_value(store, key,
                                     std::move(value_str), ttl_ms);
     } else {
         ok = co_await seastar::smp::submit_to(
-            sid,
-            [&store, key_str = std::move(key_str),
-             value_str = std::move(value_str), ttl_ms]() mutable {
-                return set_key_value(store, std::move(key_str),
-                                     std::move(value_str), ttl_ms);
+            sid, [key = seastar::sstring(key), value = std::move(value_str),
+                  ttl_ms]() mutable {
+                return set_key_value(shunyakv::local_service(), key,
+                                     std::move(value), ttl_ms);
             });
     }
 

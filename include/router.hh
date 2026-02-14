@@ -5,6 +5,7 @@
 #include <optional>
 #include <seastar/core/future.hh>
 #include <seastar/core/smp.hh>              // smp::count, this_shard_id
+#include <seastar/core/sstring.hh>
 #include <seastar/core/temporary_buffer.hh> // seastar::temporary_buffer
 #include <seastar/net/api.hh>
 #include <string_view> // not <string_value>
@@ -28,18 +29,19 @@ class service {
 
     seastar::future<> stop() { return _store.stop(); }
 
-    // Cross-shard safe API (std::string over the wire)
-    seastar::future<bool> local_set(std::string key, std::string value) {
+    seastar::future<bool> local_set(std::string_view key,
+                                    seastar::sstring value) {
         key_t k{key.data(), key.size()}; // sstring on this shard
         return _store.set(std::move(k), std::move(value));
     }
-    seastar::future<bool> local_set(std::string key, std::string value,
+    seastar::future<bool> local_set(std::string_view key,
+                                    seastar::sstring value,
                                     uint64_t ttl) {
         key_t k{key.data(), key.size()}; // sstring on this shard
         return _store.set_with_ttl(std::move(k), std::move(value), ttl);
     }
-    seastar::future<std::optional<std::string>>
-    local_get(const std::string &key) const {
+    seastar::future<std::optional<seastar::sstring>>
+    local_get(std::string_view key) const {
         key_t k{key.data(), key.size()};
         return _store.get(k);
     }
@@ -47,5 +49,10 @@ class service {
   private:
     store _store;
 };
+
+inline service &local_service() {
+    static thread_local service svc;
+    return svc;
+}
 
 } // namespace shunyakv
