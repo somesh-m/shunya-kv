@@ -17,6 +17,13 @@
 // static seastar::logger store_logger{"store"};
 namespace shunyakv {
 
+#ifndef SHUNYAKV_ENABLE_HOT_PATH_METRICS
+#define SHUNYAKV_ENABLE_HOT_PATH_METRICS 1
+#endif
+#ifndef SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
+#define SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS 1
+#endif
+
 struct request_counters {
     uint64_t get_total{0};
     uint64_t get_forwarded{0};
@@ -80,16 +87,12 @@ struct latency_histogram {
 };
 
 struct request_latency_counters {
-    latency_histogram get_non_forwarded;
-    latency_histogram get_forwarded;
-    latency_histogram set_non_forwarded;
-    latency_histogram set_forwarded;
+    latency_histogram get;
+    latency_histogram set;
 
     void merge_from(const request_latency_counters &other) noexcept {
-        get_non_forwarded.merge_from(other.get_non_forwarded);
-        get_forwarded.merge_from(other.get_forwarded);
-        set_non_forwarded.merge_from(other.set_non_forwarded);
-        set_forwarded.merge_from(other.set_forwarded);
+        get.merge_from(other.get);
+        set.merge_from(other.set);
     }
 };
 
@@ -127,33 +130,49 @@ class service {
     }
 
     void record_get(bool forwarded) noexcept {
+#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
         ++_req_counters.get_total;
+#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
         if (forwarded) {
             ++_req_counters.get_forwarded;
         }
+#else
+        (void)forwarded;
+#endif
+#else
+        (void)forwarded;
+#endif
     }
 
     void record_set(bool forwarded) noexcept {
+#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
         ++_req_counters.set_total;
+#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
         if (forwarded) {
             ++_req_counters.set_forwarded;
         }
+#else
+        (void)forwarded;
+#endif
+#else
+        (void)forwarded;
+#endif
     }
 
-    void record_get_latency(bool forwarded, uint64_t latency_us) noexcept {
-        if (forwarded) {
-            _latency_counters.get_forwarded.add_us(latency_us);
-        } else {
-            _latency_counters.get_non_forwarded.add_us(latency_us);
-        }
+    void record_get_latency(uint64_t latency_us) noexcept {
+#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
+        _latency_counters.get.add_us(latency_us);
+#else
+        (void)latency_us;
+#endif
     }
 
-    void record_set_latency(bool forwarded, uint64_t latency_us) noexcept {
-        if (forwarded) {
-            _latency_counters.set_forwarded.add_us(latency_us);
-        } else {
-            _latency_counters.set_non_forwarded.add_us(latency_us);
-        }
+    void record_set_latency(uint64_t latency_us) noexcept {
+#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
+        _latency_counters.set.add_us(latency_us);
+#else
+        (void)latency_us;
+#endif
     }
 
     request_counters snapshot_request_counters() const noexcept {

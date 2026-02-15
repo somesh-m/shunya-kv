@@ -21,7 +21,8 @@
 #include "conn/resp_handler.hh"
 #include "conn/socket_handler.hh"
 #include "dbconfig.hh"
-
+// - DENABLE_HOT_PATH_METRICS = OFF
+// - DENABLE_FORWARDED_REQUEST_COUNTERS = OFF
 using namespace seastar;
 using namespace shunyakv;
 
@@ -36,7 +37,8 @@ struct shard_shutdown_stats {
     request_latency_counters latency;
 };
 
-static seastar::future<> log_request_counters_on_shutdown() {
+static seastar::future<> log_request_counters_on_shutdown(
+    std::chrono::steady_clock::time_point run_start) {
     std::vector<seastar::future<shard_shutdown_stats>> futs;
     futs.reserve(seastar::smp::count);
     for (unsigned sid = 0; sid < seastar::smp::count; ++sid) {
@@ -74,6 +76,19 @@ static seastar::future<> log_request_counters_on_shutdown() {
                "total={} forwarded={}",
                get_total, get_forwarded, set_total, set_forwarded);
 
+    const uint64_t total_ops = get_total + set_total;
+    const auto elapsed_s =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            std::chrono::steady_clock::now() - run_start)
+            .count();
+    const double safe_elapsed_s = elapsed_s > 0.0 ? elapsed_s : 1.0;
+    const double qps = static_cast<double>(total_ops) / safe_elapsed_s;
+    const double get_qps = static_cast<double>(get_total) / safe_elapsed_s;
+    const double set_qps = static_cast<double>(set_total) / safe_elapsed_s;
+    m_log.info("cluster throughput: uptime_s={:.3f} total_ops={} qps={:.3f} "
+               "get_qps={:.3f} set_qps={:.3f}",
+               elapsed_s, total_ops, qps, get_qps, set_qps);
+
     const auto us_to_ms = [](uint64_t us) {
         return static_cast<double>(us) / 1000.0;
     };
@@ -85,10 +100,8 @@ static seastar::future<> log_request_counters_on_shutdown() {
             us_to_ms(h.quantile_us(0.999)));
     };
 
-    log_pct("GET non-forwarded latency", merged_latency.get_non_forwarded);
-    log_pct("GET forwarded latency", merged_latency.get_forwarded);
-    log_pct("SET non-forwarded latency", merged_latency.set_non_forwarded);
-    log_pct("SET forwarded latency", merged_latency.set_forwarded);
+    log_pct("GET latency", merged_latency.get);
+    log_pct("SET latency", merged_latency.set);
     co_return;
 }
 
@@ -103,16 +116,18 @@ seastar::future<> init() {
     shunyakv::set_node_cfg(cfg);
 
     uint16_t port = cfg.base_port;
+    const auto run_start = std::chrono::steady_clock::now();
     return seastar::do_with(
         socket_server_orchestrator{}, seastar::abort_source{},
-        [port](socket_server_orchestrator &server, seastar::abort_source &as) {
+        [port, run_start](socket_server_orchestrator &server,
+                          seastar::abort_source &as) {
             engine().handle_signal(SIGINT, [&as] { as.request_abort(); });
             engine().handle_signal(SIGTERM, [&as] { as.request_abort(); });
 
-            return seastar::smp::invoke_on_all([enabled = config
-                                                           .send_shard_details_on_connect] {
-                       shunyakv::set_send_shard_details_on_connect(enabled);
-                   })
+            return seastar::smp::invoke_on_all(
+                       [enabled = config.send_shard_details_on_connect] {
+                           shunyakv::set_send_shard_details_on_connect(enabled);
+                       })
                 .then([&server, port] {
                     m_log.info("send_shard_details_on_connect={}",
                                config.send_shard_details_on_connect);
@@ -126,7 +141,8 @@ seastar::future<> init() {
                                 [] { return std::make_unique<RespHandler>(); })
                             .then([port, lo, &server]() mutable {
                                 return server.listen(
-                                    socket_address(ipv4_addr{"0.0.0.0", port}), lo);
+                                    socket_address(ipv4_addr{"0.0.0.0", port}),
+                                    lo);
                             });
                     });
                 })
@@ -136,9 +152,10 @@ seastar::future<> init() {
                         .handle_exception_type(
                             [](const seastar::sleep_aborted &) {});
                 })
-                .finally([&server] {
-                    return server.stop().then(
-                        [] { return log_request_counters_on_shutdown(); });
+                .finally([&server, run_start] {
+                    return server.stop().then([run_start] {
+                        return log_request_counters_on_shutdown(run_start);
+                    });
                 });
         });
 }

@@ -84,7 +84,9 @@ seastar::future<> handle_set(const resp::Array &cmd,
         co_await resp::write_error(out, "ERR syntax error");
         co_return;
     }
+#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
     const auto start = std::chrono::steady_clock::now();
+#endif
 
     // Check shard
     unsigned sid =
@@ -113,11 +115,13 @@ seastar::future<> handle_set(const resp::Array &cmd,
         co_await resp::write_error(out, "NOT STORED");
         set_logger.info("NOT STORED {}", key);
     }
+#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
     const auto latency_us =
         static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                                   std::chrono::steady_clock::now() - start)
                                   .count());
-    store.record_set_latency(forwarded, latency_us);
+    store.record_set_latency(latency_us);
+#endif
 
     co_return;
 }

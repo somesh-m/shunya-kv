@@ -41,7 +41,9 @@ seastar::future<> handle_get(const resp::Array &cmd,
         co_await resp::write_error(out, "ERR empty key");
         co_return;
     }
+#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
     const auto start = std::chrono::steady_clock::now();
+#endif
 
     // Check shard
     const unsigned sid = shard_for(std::string_view(key.data(), key.size()));
@@ -69,11 +71,13 @@ seastar::future<> handle_get(const resp::Array &cmd,
         // Optional debug:
         // get_logger.debug("NOT_FOUND {}", key);
     }
+#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
     const auto latency_us =
         static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                                   std::chrono::steady_clock::now() - start)
                                   .count());
-    store.record_get_latency(forwarded, latency_us);
+    store.record_get_latency(latency_us);
+#endif
 
     co_return;
 }
