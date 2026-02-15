@@ -40,6 +40,17 @@ message(STATUS "Seastar found: ${Seastar_DIR}")
 message(STATUS "Seastar version: ${Seastar_VERSION}")
 
 find_package(fmt 9 REQUIRED)
+find_package(absl CONFIG QUIET)
+if (NOT absl_FOUND)
+  include(FetchContent)
+  FetchContent_Declare(
+    abseil_cpp
+    GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
+    GIT_TAG 20240116.2
+  )
+  FetchContent_MakeAvailable(abseil_cpp)
+endif()
+
 
 # ---- proto_helpers lib ----
 add_library(proto_helpers STATIC
@@ -100,6 +111,7 @@ target_link_libraries(shunya_store PRIVATE
   fmt::fmt
   proto_helpers
   fnv_ref            # <-- link the official FNV ref
+  absl::flat_hash_map
 )
 
 endif()

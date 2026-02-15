@@ -1,8 +1,8 @@
 // kv_store.hh
 #pragma once
+#include <absl/container/flat_hash_map.h>
 #include "kv_types.hh"
 #include <seastar/core/future.hh>
-#include <unordered_map>
 
 namespace shunyakv {
 class store {
@@ -20,6 +20,6 @@ class store {
                                        uint64_t ttl);
 
   private:
-    std::unordered_map<key_t, seastar::sstring> _map; // internal storage
+    absl::flat_hash_map<key_t, seastar::sstring> _map;
 };
-}; // namespace shunyakv
+} // namespace shunyakv
