@@ -107,9 +107,28 @@ static seastar::future<> log_request_counters_on_shutdown(
     const double qps = static_cast<double>(total_ops) / safe_elapsed_s;
     const double get_qps = static_cast<double>(get_total) / safe_elapsed_s;
     const double set_qps = static_cast<double>(set_total) / safe_elapsed_s;
-    m_log.info("cluster throughput: uptime_s={:.3f} total_ops={} qps={:.3f} "
-               "get_qps={:.3f} set_qps={:.3f}",
+    m_log.info("cluster throughput: uptime_s={:.3f} total_ops={} "
+               "ops_per_sec={:.3f} get_qps={:.3f} set_qps={:.3f}",
                elapsed_s, total_ops, qps, get_qps, set_qps);
+#elif SHUNYAKV_ENABLE_HOT_PATH_METRICS
+    const auto elapsed_s =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            std::chrono::steady_clock::now() - run_start)
+            .count();
+    const double safe_elapsed_s = elapsed_s > 0.0 ? elapsed_s : 1.0;
+    const uint64_t total_ops = merged_latency.total.count;
+    const double ops_per_sec = static_cast<double>(total_ops) / safe_elapsed_s;
+    m_log.info("cluster throughput: uptime_s={:.3f} total_ops={} "
+               "ops_per_sec={:.3f}",
+               elapsed_s, total_ops, ops_per_sec);
+#else
+    const auto elapsed_s =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            std::chrono::steady_clock::now() - run_start)
+            .count();
+    m_log.info("cluster throughput: uptime_s={:.3f} total_ops=unavailable "
+               "ops_per_sec=unavailable",
+               elapsed_s);
 #endif
 
     const auto us_to_ms = [](uint64_t us) {
