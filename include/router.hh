@@ -20,6 +20,9 @@ namespace shunyakv {
 #ifndef SHUNYAKV_ENABLE_HOT_PATH_METRICS
 #define SHUNYAKV_ENABLE_HOT_PATH_METRICS 1
 #endif
+#ifndef SHUNYAKV_ENABLE_REQUEST_COUNTERS
+#define SHUNYAKV_ENABLE_REQUEST_COUNTERS 1
+#endif
 #ifndef SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
 #define SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS 1
 #endif
@@ -87,12 +90,10 @@ struct latency_histogram {
 };
 
 struct request_latency_counters {
-    latency_histogram get;
-    latency_histogram set;
+    latency_histogram total;
 
     void merge_from(const request_latency_counters &other) noexcept {
-        get.merge_from(other.get);
-        set.merge_from(other.set);
+        total.merge_from(other.total);
     }
 };
 
@@ -130,7 +131,7 @@ class service {
     }
 
     void record_get(bool forwarded) noexcept {
-#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
+#if SHUNYAKV_ENABLE_REQUEST_COUNTERS
         ++_req_counters.get_total;
 #if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
         if (forwarded) {
@@ -145,7 +146,7 @@ class service {
     }
 
     void record_set(bool forwarded) noexcept {
-#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
+#if SHUNYAKV_ENABLE_REQUEST_COUNTERS
         ++_req_counters.set_total;
 #if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
         if (forwarded) {
@@ -161,7 +162,7 @@ class service {
 
     void record_get_latency(uint64_t latency_us) noexcept {
 #if SHUNYAKV_ENABLE_HOT_PATH_METRICS
-        _latency_counters.get.add_us(latency_us);
+        _latency_counters.total.add_us(latency_us);
 #else
         (void)latency_us;
 #endif
@@ -169,7 +170,7 @@ class service {
 
     void record_set_latency(uint64_t latency_us) noexcept {
 #if SHUNYAKV_ENABLE_HOT_PATH_METRICS
-        _latency_counters.set.add_us(latency_us);
+        _latency_counters.total.add_us(latency_us);
 #else
         (void)latency_us;
 #endif

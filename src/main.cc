@@ -22,7 +22,10 @@
 #include "conn/socket_handler.hh"
 #include "dbconfig.hh"
 // - DENABLE_HOT_PATH_METRICS = OFF
-// - DENABLE_FORWARDED_REQUEST_COUNTERS = OFF
+// - DENABLE_REQUEST_COUNTERS = OFF
+// -DENABLE_FORWARDED_REQUEST_COUNTERS=OFF
+// -DENABLE_REQUEST_COUNTERS=OFF
+
 using namespace seastar;
 using namespace shunyakv;
 
@@ -53,28 +56,47 @@ static seastar::future<> log_request_counters_on_shutdown(
     auto per_shard =
         co_await seastar::when_all_succeed(futs.begin(), futs.end());
 
+#if SHUNYAKV_ENABLE_REQUEST_COUNTERS
     uint64_t get_total = 0;
-    uint64_t get_forwarded = 0;
     uint64_t set_total = 0;
+#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
+    uint64_t get_forwarded = 0;
     uint64_t set_forwarded = 0;
+#endif
+#endif
     request_latency_counters merged_latency;
 
     for (unsigned sid = 0; sid < per_shard.size(); ++sid) {
+#if SHUNYAKV_ENABLE_REQUEST_COUNTERS
         const auto &c = per_shard[sid].req;
         get_total += c.get_total;
-        get_forwarded += c.get_forwarded;
         set_total += c.set_total;
+#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
+        get_forwarded += c.get_forwarded;
         set_forwarded += c.set_forwarded;
-        merged_latency.merge_from(per_shard[sid].latency);
+#endif
+#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
         m_log.info("shard {} request counters: GET total={} forwarded={} | SET "
                    "total={} forwarded={}",
                    sid, c.get_total, c.get_forwarded, c.set_total,
                    c.set_forwarded);
+#else
+        m_log.info("shard {} request counters: GET total={} | SET total={}",
+                   sid, c.get_total, c.set_total);
+#endif
+#endif
+        merged_latency.merge_from(per_shard[sid].latency);
     }
 
+#if SHUNYAKV_ENABLE_REQUEST_COUNTERS
+#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
     m_log.info("cluster request counters: GET total={} forwarded={} | SET "
                "total={} forwarded={}",
                get_total, get_forwarded, set_total, set_forwarded);
+#else
+    m_log.info("cluster request counters: GET total={} | SET total={}",
+               get_total, set_total);
+#endif
 
     const uint64_t total_ops = get_total + set_total;
     const auto elapsed_s =
@@ -88,6 +110,7 @@ static seastar::future<> log_request_counters_on_shutdown(
     m_log.info("cluster throughput: uptime_s={:.3f} total_ops={} qps={:.3f} "
                "get_qps={:.3f} set_qps={:.3f}",
                elapsed_s, total_ops, qps, get_qps, set_qps);
+#endif
 
     const auto us_to_ms = [](uint64_t us) {
         return static_cast<double>(us) / 1000.0;
@@ -100,8 +123,7 @@ static seastar::future<> log_request_counters_on_shutdown(
             us_to_ms(h.quantile_us(0.999)));
     };
 
-    log_pct("GET latency", merged_latency.get);
-    log_pct("SET latency", merged_latency.set);
+    log_pct("OPS latency", merged_latency.total);
     co_return;
 }
 

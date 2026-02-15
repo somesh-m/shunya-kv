@@ -5,6 +5,7 @@ project (SeastarExample)
 option(BUILD_SERVER "Build the shunya_store server" ON)
 option(ENABLE_TESTS "Build and run tests" ON)
 option(ENABLE_HOT_PATH_METRICS "Enable request forwarding counters and latency measurement in hot path" ON)
+option(ENABLE_REQUEST_COUNTERS "Enable counting total GET/SET requests" ON)
 option(ENABLE_FORWARDED_REQUEST_COUNTERS "Enable counting forwarded GET/SET requests" ON)
 
 # ---- C++ standard / build type ----
@@ -84,6 +85,10 @@ target_compile_definitions(shunya_store PRIVATE -DSEASTAR_API_LEVEL=8)
 target_compile_definitions(shunya_store PRIVATE
   $<$<BOOL:${ENABLE_HOT_PATH_METRICS}>:SHUNYAKV_ENABLE_HOT_PATH_METRICS=1>
   $<$<NOT:$<BOOL:${ENABLE_HOT_PATH_METRICS}>>:SHUNYAKV_ENABLE_HOT_PATH_METRICS=0>
+)
+target_compile_definitions(shunya_store PRIVATE
+  $<$<BOOL:${ENABLE_REQUEST_COUNTERS}>:SHUNYAKV_ENABLE_REQUEST_COUNTERS=1>
+  $<$<NOT:$<BOOL:${ENABLE_REQUEST_COUNTERS}>>:SHUNYAKV_ENABLE_REQUEST_COUNTERS=0>
 )
 target_compile_definitions(shunya_store PRIVATE
   $<$<BOOL:${ENABLE_FORWARDED_REQUEST_COUNTERS}>:SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS=1>
