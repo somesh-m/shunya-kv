@@ -42,12 +42,14 @@ static seastar::future<> log_request_counters_on_shutdown() {
     for (unsigned sid = 0; sid < seastar::smp::count; ++sid) {
         futs.emplace_back(seastar::smp::submit_to(sid, [] {
             auto &svc = shunyakv::local_service();
-            return shard_shutdown_stats{svc.snapshot_request_counters(),
-                                        svc.snapshot_request_latency_counters()};
+            return shard_shutdown_stats{
+                svc.snapshot_request_counters(),
+                svc.snapshot_request_latency_counters()};
         }));
     }
 
-    auto per_shard = co_await seastar::when_all_succeed(futs.begin(), futs.end());
+    auto per_shard =
+        co_await seastar::when_all_succeed(futs.begin(), futs.end());
 
     uint64_t get_total = 0;
     uint64_t get_forwarded = 0;
@@ -94,8 +96,8 @@ seastar::future<> init() {
     // Config block
     static node_cfg cfg;
     cfg.base_port = config.db_port;
-    // cfg.smp = seastar::smp::count;
-    // cfg.port_offset = 1;
+    cfg.smp = seastar::smp::count;
+    cfg.port_offset = 0;
     cfg.hash = config.hash;
     // cfg.isPreHashed = true;
     shunyakv::set_node_cfg(cfg);
@@ -107,20 +109,26 @@ seastar::future<> init() {
             engine().handle_signal(SIGINT, [&as] { as.request_abort(); });
             engine().handle_signal(SIGTERM, [&as] { as.request_abort(); });
 
-            return server.start()
-                .then([port, &server] {
-                    seastar::listen_options lo;
-                    lo.lba = server_socket::load_balancing_algorithm::
-                        connection_distribution;
+            return seastar::smp::invoke_on_all([enabled = config
+                                                           .send_shard_details_on_connect] {
+                       shunyakv::set_send_shard_details_on_connect(enabled);
+                   })
+                .then([&server, port] {
+                    m_log.info("send_shard_details_on_connect={}",
+                               config.send_shard_details_on_connect);
+                    return server.start().then([port, &server] {
+                        seastar::listen_options lo;
+                        lo.lba = server_socket::load_balancing_algorithm::
+                            connection_distribution;
 
-                    return server
-                        .set_handler([] {
-                            return std::make_unique<RespHandler>();
-                        })
-                        .then([port, lo, &server]() mutable {
-                            return server.listen(
-                                socket_address(ipv4_addr{"0.0.0.0", port}), lo);
-                        });
+                        return server
+                            .set_handler(
+                                [] { return std::make_unique<RespHandler>(); })
+                            .then([port, lo, &server]() mutable {
+                                return server.listen(
+                                    socket_address(ipv4_addr{"0.0.0.0", port}), lo);
+                            });
+                    });
                 })
                 .then([&as] {
                     return seastar::sleep_abortable(
@@ -129,9 +137,8 @@ seastar::future<> init() {
                             [](const seastar::sleep_aborted &) {});
                 })
                 .finally([&server] {
-                    return server.stop().then([] {
-                        return log_request_counters_on_shutdown();
-                    });
+                    return server.stop().then(
+                        [] { return log_request_counters_on_shutdown(); });
                 });
         });
 }

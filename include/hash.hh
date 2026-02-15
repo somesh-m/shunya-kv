@@ -10,7 +10,7 @@ namespace shunyakv {
 // -------- Config knob: which shard index is the first *data* shard --------
 // Default = 0 (legacy: all shards 0..smp-1 are data). Set to 1 if shard 0 is
 // admin-only.
-inline unsigned g_first_data_shard = 1;
+inline unsigned g_first_data_shard = 0;
 
 // Call this once at startup (e.g., in main on shard 0) if shard 0 is
 // admin-only:

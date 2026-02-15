@@ -51,6 +51,8 @@ seastar::future<> handle_get(const resp::Array &cmd,
     if (!forwarded) {
         val = co_await get_key_value(store, key);
     } else {
+        get_logger.info("Forwarding GET key='{}' from shard {} to shard {}",
+                        key, seastar::this_shard_id(), sid);
         val = co_await seastar::smp::submit_to(
             sid, [key = seastar::sstring(key)]() mutable {
                 return get_key_value(shunyakv::local_service(), key);

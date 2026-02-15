@@ -97,6 +97,8 @@ seastar::future<> handle_set(const resp::Array &cmd,
         ok = co_await set_key_value(store, key,
                                     std::move(value_str), ttl_ms);
     } else {
+        set_logger.info("Forwarding SET key='{}' from shard {} to shard {}",
+                        key, seastar::this_shard_id(), sid);
         ok = co_await seastar::smp::submit_to(
             sid, [key = seastar::sstring(key), value = std::move(value_str),
                   ttl_ms]() mutable {

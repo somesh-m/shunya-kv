@@ -28,7 +28,9 @@ extern node_cfg g_node_cfg;
 
 void set_node_cfg(const node_cfg &);
 // Equal contiguous ranges over the 64-bit hash space for *data* shards
-std::vector<hash_range> compute_hash_ranges();
+seastar::sstring compute_hash_ranges();
+seastar::sstring compute_hash(uint16_t shard_no);
+uint16_t parse_u16(const seastar::sstring &s);
 // Utility: port for a shard id, consistent with your mapping
 inline uint16_t port_for_shard(unsigned sid) {
     // data ports are base_port + (sid - first_data_shard) + 1

@@ -14,6 +14,20 @@ static inline std::string_view trim(std::string_view s) {
     return s.substr(begin, end - begin + 1);
 }
 
+static inline bool parse_bool(std::string_view v, bool &out) {
+    if (v == "1" || v == "true" || v == "TRUE" || v == "on" || v == "ON" ||
+        v == "yes" || v == "YES") {
+        out = true;
+        return true;
+    }
+    if (v == "0" || v == "false" || v == "FALSE" || v == "off" ||
+        v == "OFF" || v == "no" || v == "NO") {
+        out = false;
+        return true;
+    }
+    return false;
+}
+
 void load_config_txt(db_config &cfg, const char *path) {
     std::ifstream in(path);
     if (!in) {
@@ -52,6 +66,11 @@ void load_config_txt(db_config &cfg, const char *path) {
             }
         } else if (key == "hash") {
             cfg.hash = seastar::sstring(value.data(), value.size());
+        } else if (key == "send_shard_details_on_connect") {
+            bool parsed = false;
+            if (parse_bool(value, parsed)) {
+                cfg.send_shard_details_on_connect = parsed;
+            }
         }
     }
 }

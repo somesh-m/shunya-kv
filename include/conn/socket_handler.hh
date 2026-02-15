@@ -10,6 +10,7 @@
 
 namespace shunyakv {
 class connection;
+void set_send_shard_details_on_connect(bool enabled) noexcept;
 }
 
 class SocketHandler {

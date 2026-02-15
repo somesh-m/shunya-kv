@@ -45,6 +45,9 @@ class connection
     bool _done = false;
     bool _tls = false;
 
+    // TODO: Implement handling client id
+    seastar::sstring client_id;
+
     // Your “business logic” (echo for now)
     seastar::future<seastar::sstring> handle_line(seastar::sstring line);
 
