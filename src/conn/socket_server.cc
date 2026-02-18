@@ -103,14 +103,13 @@ future<> socket_server::do_accept_one(int which, bool tls) {
 }
 
 seastar::future<> socket_server::stop() {
-    future<> tasks_done = _task_gate.close();
     for (auto &&l : _listeners) {
         l.abort_accept();
     }
     for (auto &&c : _connections) {
         c.shutdown();
     }
-    return tasks_done;
+    return _task_gate.close();
 }
 sstring socket_server::http_date() {
     auto t = ::time(nullptr);

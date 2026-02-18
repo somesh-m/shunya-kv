@@ -86,10 +86,11 @@ seastar::sstring compute_hash(uint16_t sid) {
     seastar::sstring json;
 
     json += "{";
-    json += format("\"epoch\":{},\"smp\":{},\"base_port\":{},\"port_"
-                   "offset\":{},\"hash\":\"{}\",\"ranges\":[",
-                   g_node_cfg.epoch, g_node_cfg.smp, g_node_cfg.base_port,
-                   g_node_cfg.port_offset, g_node_cfg.hash);
+    json +=
+        format("\"epoch\":{},\"smp\":{},\"base_port\":{},\"port_"
+               "offset\":{},\"hash\":\"{}\",\"current_shard\":{},\"ranges\":[",
+               g_node_cfg.epoch, g_node_cfg.smp, g_node_cfg.base_port,
+               g_node_cfg.port_offset, g_node_cfg.hash, v[0].shard);
 
     for (size_t i = 0; i < v.size(); ++i) {
         const auto &r = v[i];

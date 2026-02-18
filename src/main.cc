@@ -169,6 +169,7 @@ seastar::future<> init() {
                        [enabled = config.send_shard_details_on_connect] {
                            shunyakv::set_send_shard_details_on_connect(enabled);
                        })
+                .then([] { return seastar::smp::invoke_on_all([] { return shunyakv::local_service().start(); }); })
                 .then([&server, port] {
                     m_log.info("send_shard_details_on_connect={}",
                                config.send_shard_details_on_connect);

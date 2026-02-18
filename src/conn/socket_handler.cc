@@ -1,7 +1,11 @@
 #include "conn/socket_handler.hh"
 #include "cmd_node_info.hh"
 #include "conn/connections.hh"
+#include <chrono>
+#include <seastar/core/coroutine.hh>
+#include <seastar/core/future-util.hh>
 #include <seastar/core/when_all.hh>
+#include <seastar/util/log.hh>
 #include <utility>
 
 namespace shunyakv {
@@ -11,6 +15,8 @@ void set_send_shard_details_on_connect(bool enabled) noexcept {
     g_send_shard_details_on_connect = enabled;
 }
 } // namespace shunyakv
+
+static seastar::logger socket_handler_log{"socket_handler"};
 
 static seastar::future<> send_shard_details(shunyakv::connection &c) {
     auto &out = c.out();
@@ -59,6 +65,8 @@ seastar::future<> PipelinedSocketHandler::read_loop(shunyakv::connection &c) {
                 co_await _slots.wait(1);
                 _respq.push_back(handle_request(std::move(*req_opt)));
                 _cv.signal();
+                // Prevent long non-yield parsing bursts from stalling reactor.
+                co_await seastar::maybe_yield();
             }
         }
     } catch (...) {
@@ -85,8 +93,17 @@ seastar::future<> PipelinedSocketHandler::write_loop(shunyakv::connection &c) {
 
             seastar::sstring resp;
             try {
-                resp = co_await std::move(fut);
+                const auto deadline =
+                    seastar::lowres_clock::now() + std::chrono::seconds(2);
+                resp = co_await seastar::with_timeout(deadline, std::move(fut));
             } catch (...) {
+                socket_handler_log.warn("dropping connection on shard {} due "
+                                        "to stuck request future",
+                                        seastar::this_shard_id());
+                _eof = true;
+                _cv.broadcast();
+                // Unblock read_loop if it is waiting for an inflight slot.
+                _slots.signal(max_inflight);
                 co_return;
             }
 
@@ -97,6 +114,10 @@ seastar::future<> PipelinedSocketHandler::write_loop(shunyakv::connection &c) {
             _slots.signal(1);
         }
     } catch (...) {
+        _eof = true;
+        _cv.broadcast();
+        // Unblock read_loop if it is waiting for an inflight slot.
+        _slots.signal(max_inflight);
         co_return;
     }
 }

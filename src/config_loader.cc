@@ -1,7 +1,9 @@
 #include "config_loader.hh"
 
 #include <charconv>
+#include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -29,10 +31,34 @@ static inline bool parse_bool(std::string_view v, bool &out) {
 }
 
 void load_config_txt(db_config &cfg, const char *path) {
+    namespace fs = std::filesystem;
+
+    fs::path selected;
     std::ifstream in(path);
+    if (in) {
+        selected = fs::path(path);
+    }
+
     if (!in) {
+        const fs::path requested(path);
+        if (!requested.is_absolute() && requested == "config.txt") {
+            for (const fs::path &candidate :
+                 {fs::path("../config.txt"), fs::path("../../config.txt")}) {
+                in = std::ifstream(candidate);
+                if (in) {
+                    selected = candidate;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!in) {
+        std::cerr << "config: unable to open '" << path
+                  << "', using built-in defaults\n";
         return;
     }
+    std::cerr << "config: loaded '" << selected.string() << "'\n";
 
     std::string line;
     while (std::getline(in, line)) {

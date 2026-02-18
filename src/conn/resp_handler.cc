@@ -41,34 +41,58 @@ bool ascii_ieq(std::string_view a, std::string_view b) {
     return true;
 }
 
+inline void compact_if_needed(seastar::sstring &buf, size_t &off) {
+    if (off == 0) {
+        return;
+    }
+    if (off >= buf.size()) {
+        buf = {};
+        off = 0;
+        return;
+    }
+    if (off >= 4096 || off * 2 >= buf.size()) {
+        buf = buf.substr(off);
+        off = 0;
+    }
+}
+
 } // namespace
 
 std::optional<seastar::sstring>
 RespHandler::try_extract_request(seastar::sstring &buf) {
+    if (_off >= buf.size()) {
+        buf = {};
+        _off = 0;
+        return std::nullopt;
+    }
     if (buf.empty()) {
         return std::nullopt;
     }
 
+    std::string_view view(buf.data() + _off, buf.size() - _off);
     size_t frame_len = 0;
-    switch (resp::parse_frame_length(std::string_view(buf.data(), buf.size()),
-                                     frame_len)) {
+    switch (resp::parse_frame_length(view, frame_len)) {
     case resp::frame_parse_status::ok: {
-        auto frame = buf.substr(0, frame_len);
-        buf.erase(buf.begin(), buf.begin() + frame_len);
+        auto frame = buf.substr(_off, frame_len);
+        _off += frame_len;
+        compact_if_needed(buf, _off);
         return frame;
     }
     case resp::frame_parse_status::need_more:
+        compact_if_needed(buf, _off);
         return std::nullopt;
     case resp::frame_parse_status::invalid: {
         // Consume up to line-end so bad input does not stall the connection.
-        auto nl = buf.find('\n');
+        auto nl = view.find('\n');
         if (nl == seastar::sstring::npos) {
-            auto bad = std::move(buf);
-            buf = {};
+            auto bad = buf.substr(_off);
+            _off = buf.size();
+            compact_if_needed(buf, _off);
             return bad;
         }
-        auto bad = buf.substr(0, nl + 1);
-        buf.erase(buf.begin(), buf.begin() + nl + 1);
+        auto bad = buf.substr(_off, nl + 1);
+        _off += nl + 1;
+        compact_if_needed(buf, _off);
         return bad;
     }
     }
@@ -97,7 +121,6 @@ seastar::future<seastar::sstring> RespHandler::handle_request(seastar::sstring r
 
         co_await it->second(cmd, out, shunyakv::local_service());
         co_await out.flush();
-        co_await out.close();
         co_return buffer_vector_to_sstring(bufs);
     } catch (const std::exception &ex) {
         co_return seastar::sstring("-ERR ") + seastar::sstring(ex.what()) + "\r\n";
