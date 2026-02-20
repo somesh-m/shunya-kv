@@ -4,16 +4,18 @@ project (SeastarExample)
 
 option(BUILD_SERVER "Build the shunya_store server" ON)
 option(ENABLE_TESTS "Build and run tests" ON)
-option(ENABLE_HOT_PATH_METRICS "Enable request forwarding counters and latency measurement in hot path" ON)
-option(ENABLE_REQUEST_COUNTERS "Enable counting total GET/SET requests" ON)
-option(ENABLE_FORWARDED_REQUEST_COUNTERS "Enable counting forwarded GET/SET requests" ON)
+option(ENABLE_HOT_PATH_METRICS "Enable request forwarding counters and latency measurement in hot path" OFF)
+option(ENABLE_REQUEST_COUNTERS "Enable counting total GET/SET requests" OFF)
+option(ENABLE_FORWARDED_REQUEST_COUNTERS "Enable counting forwarded GET/SET requests" OFF)
+option(ENABLE_SANITIZERS "Enable ASan/UBSan instrumentation for shunya_store" OFF)
 
 # ---- C++ standard / build type ----
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Debug)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING
+      "Choose the type of build." FORCE)
 endif()
 
 # ---- Paths ----
@@ -38,6 +40,14 @@ set_target_properties(fnv_ref PROPERTIES POSITION_INDEPENDENT_CODE ON)
 find_package (Seastar CONFIG REQUIRED)
 message(STATUS "Seastar found: ${Seastar_DIR}")
 message(STATUS "Seastar version: ${Seastar_VERSION}")
+
+#find_library(JEMALLOC_LIB jemalloc)
+#if(JEMALLOC_LIB)
+#  message(STATUS "jemalloc found: ${JEMALLOC_LIB}")
+#else()
+#  message(WARNING "jemalloc not found; shunya_store will link with the default allocator")
+#endif()
+
 
 find_package(fmt 9 REQUIRED)
 find_package(absl CONFIG QUIET)
@@ -86,13 +96,9 @@ target_compile_options(shunya_store PRIVATE
   $<$<CONFIG:Release>:-O3 -g1>
   $<$<CONFIG:RelWithDebInfo>:-O3 -g1 -fno-omit-frame-pointer>
   $<$<CONFIG:MinSizeRel>:-Os -g0>
+  $<$<CONFIG:PerfProfile>:-O3 -g1 -fno-omit-frame-pointer>
 )
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING
-      "Choose the type of build." FORCE)
-endif()
-target_compile_definitions(shunya_store PRIVATE -DSEASTAR_API_LEVEL=8)
 target_compile_definitions(shunya_store PRIVATE
   $<$<BOOL:${ENABLE_HOT_PATH_METRICS}>:SHUNYAKV_ENABLE_HOT_PATH_METRICS=1>
   $<$<NOT:$<BOOL:${ENABLE_HOT_PATH_METRICS}>>:SHUNYAKV_ENABLE_HOT_PATH_METRICS=0>
@@ -113,6 +119,14 @@ target_link_libraries(shunya_store PRIVATE
   fnv_ref            # <-- link the official FNV ref
   absl::flat_hash_map
 )
+if(JEMALLOC_LIB)
+  target_link_libraries(shunya_store PRIVATE ${JEMALLOC_LIB})
+endif()
+
+if (ENABLE_SANITIZERS)
+  target_compile_options(shunya_store PRIVATE -fsanitize=address,undefined)
+  target_link_options(shunya_store PRIVATE -fsanitize=address,undefined)
+endif()
 
 endif()
 

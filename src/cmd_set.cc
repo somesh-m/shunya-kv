@@ -5,12 +5,12 @@
 #include <resp/resp_types.hh>
 #include <resp/resp_writer.hh>
 
+#include <charconv>
+#include <chrono>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/smp.hh>
-#include <charconv>
-#include <chrono>
 #include <string>
 
 static seastar::logger set_logger{"cmd_set"};
@@ -96,11 +96,10 @@ seastar::future<> handle_set(const resp::Array &cmd,
     seastar::sstring value_str(value.data(), value.size());
     bool ok = false;
     if (!forwarded) {
-        ok = co_await set_key_value(store, key,
-                                    std::move(value_str), ttl_ms);
+        ok = co_await set_key_value(store, key, std::move(value_str), ttl_ms);
     } else {
-        set_logger.info("Forwarding SET key='{}' from shard {} to shard {}",
-                        key, seastar::this_shard_id(), sid);
+        // set_logger.info("Forwarding SET key='{}' from shard {} to shard {}",
+        //                 key, seastar::this_shard_id(), sid);
         ok = co_await seastar::smp::submit_to(
             sid, [key = seastar::sstring(key), value = std::move(value_str),
                   ttl_ms]() mutable {
@@ -116,10 +115,10 @@ seastar::future<> handle_set(const resp::Array &cmd,
         set_logger.info("NOT STORED {}", key);
     }
 #if SHUNYAKV_ENABLE_HOT_PATH_METRICS
-    const auto latency_us =
-        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-                                  std::chrono::steady_clock::now() - start)
-                                  .count());
+    const auto latency_us = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start)
+            .count());
     store.record_set_latency(latency_us);
 #endif
 

@@ -5,8 +5,8 @@
 #include <resp/resp_types.hh>
 #include <resp/resp_writer.hh>
 
-#include <hash.hh>
 #include <chrono>
+#include <hash.hh>
 #include <optional>
 #include <seastar/core/future.hh>
 #include <seastar/core/iostream.hh>
@@ -53,8 +53,8 @@ seastar::future<> handle_get(const resp::Array &cmd,
     if (!forwarded) {
         val = co_await get_key_value(store, key);
     } else {
-        get_logger.info("Forwarding GET key='{}' from shard {} to shard {}",
-                        key, seastar::this_shard_id(), sid);
+        // get_logger.info("Forwarding GET key='{}' from shard {} to shard {}",
+        //                 key, seastar::this_shard_id(), sid);
         val = co_await seastar::smp::submit_to(
             sid, [key = seastar::sstring(key)]() mutable {
                 return get_key_value(shunyakv::local_service(), key);
@@ -72,10 +72,10 @@ seastar::future<> handle_get(const resp::Array &cmd,
         // get_logger.debug("NOT_FOUND {}", key);
     }
 #if SHUNYAKV_ENABLE_HOT_PATH_METRICS
-    const auto latency_us =
-        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-                                  std::chrono::steady_clock::now() - start)
-                                  .count());
+    const auto latency_us = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start)
+            .count());
     store.record_get_latency(latency_us);
 #endif
 
