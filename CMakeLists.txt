@@ -4,9 +4,7 @@ project (SeastarExample)
 
 option(BUILD_SERVER "Build the shunya_store server" ON)
 option(ENABLE_TESTS "Build and run tests" ON)
-option(ENABLE_HOT_PATH_METRICS "Enable request forwarding counters and latency measurement in hot path" OFF)
-option(ENABLE_REQUEST_COUNTERS "Enable counting total GET/SET requests" OFF)
-option(ENABLE_FORWARDED_REQUEST_COUNTERS "Enable counting forwarded GET/SET requests" OFF)
+option(ENABLE_HOT_PATH_DEBUG "Enable request forwarding counters and latency measurement in hot path" OFF)
 option(ENABLE_SANITIZERS "Enable ASan/UBSan instrumentation for shunya_store" OFF)
 
 # ---- C++ standard / build type ----
@@ -100,16 +98,8 @@ target_compile_options(shunya_store PRIVATE
 )
 
 target_compile_definitions(shunya_store PRIVATE
-  $<$<BOOL:${ENABLE_HOT_PATH_METRICS}>:SHUNYAKV_ENABLE_HOT_PATH_METRICS=1>
-  $<$<NOT:$<BOOL:${ENABLE_HOT_PATH_METRICS}>>:SHUNYAKV_ENABLE_HOT_PATH_METRICS=0>
-)
-target_compile_definitions(shunya_store PRIVATE
-  $<$<BOOL:${ENABLE_REQUEST_COUNTERS}>:SHUNYAKV_ENABLE_REQUEST_COUNTERS=1>
-  $<$<NOT:$<BOOL:${ENABLE_REQUEST_COUNTERS}>>:SHUNYAKV_ENABLE_REQUEST_COUNTERS=0>
-)
-target_compile_definitions(shunya_store PRIVATE
-  $<$<BOOL:${ENABLE_FORWARDED_REQUEST_COUNTERS}>:SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS=1>
-  $<$<NOT:$<BOOL:${ENABLE_FORWARDED_REQUEST_COUNTERS}>>:SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS=0>
+  $<$<BOOL:${ENABLE_HOT_PATH_DEBUG}>:SHUNYAKV_ENABLE_HOT_PATH_DEBUG=1>
+  $<$<NOT:$<BOOL:${ENABLE_HOT_PATH_DEBUG}>>:SHUNYAKV_ENABLE_HOT_PATH_DEBUG=0>
 )
 
 target_link_libraries(shunya_store PRIVATE

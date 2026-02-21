@@ -5,6 +5,7 @@
 #include <resp/resp_types.hh>
 #include <resp/resp_writer.hh>
 
+#include "hotpath_metrics.hh"
 #include <chrono>
 #include <hash.hh>
 #include <optional>
@@ -41,9 +42,8 @@ seastar::future<> handle_get(const resp::Array &cmd,
         co_await resp::write_error(out, "ERR empty key");
         co_return;
     }
-#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
-    const auto start = std::chrono::steady_clock::now();
-#endif
+
+    HOTPATH_START(start);
 
     // Check shard
     const unsigned sid = shard_for(std::string_view(key.data(), key.size()));
@@ -53,8 +53,9 @@ seastar::future<> handle_get(const resp::Array &cmd,
     if (!forwarded) {
         val = co_await get_key_value(store, key);
     } else {
-        // get_logger.info("Forwarding GET key='{}' from shard {} to shard {}",
-        //                 key, seastar::this_shard_id(), sid);
+        HOTPATHLOGS(
+            get_logger.info("Forwarding GET key='{}' from shard {} to shard {}",
+                            key, seastar::this_shard_id(), sid));
         val = co_await seastar::smp::submit_to(
             sid, [key = seastar::sstring(key)]() mutable {
                 return get_key_value(shunyakv::local_service(), key);
@@ -67,18 +68,12 @@ seastar::future<> handle_get(const resp::Array &cmd,
         // (or if you change service to return sstring, you can avoid this copy)
     } else {
         // RESP null bulk for misses (redis-cli expects this)
+        HOTPATHCOUNT(store.record_cache_miss());
+        HOTPATHLOGS(get_logger.info("Cannot find key = {} ", key));
         co_await resp::write_null(out);
-        // Optional debug:
-        // get_logger.debug("NOT_FOUND {}", key);
     }
-#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
-    const auto latency_us = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - start)
-            .count());
-    store.record_get_latency(latency_us);
-#endif
 
+    HOTPATH_END(start, store.record_get_latency);
     co_return;
 }
 

@@ -21,10 +21,7 @@
 #include "conn/resp_handler.hh"
 #include "conn/socket_handler.hh"
 #include "dbconfig.hh"
-// - DENABLE_HOT_PATH_METRICS = OFF
-// - DENABLE_REQUEST_COUNTERS = OFF
-// -DENABLE_FORWARDED_REQUEST_COUNTERS=OFF
-// -DENABLE_REQUEST_COUNTERS=OFF
+#include "hotpath_metrics.hh"
 
 using namespace seastar;
 using namespace shunyakv;
@@ -56,93 +53,82 @@ static seastar::future<> log_request_counters_on_shutdown(
     auto per_shard =
         co_await seastar::when_all_succeed(futs.begin(), futs.end());
 
-#if SHUNYAKV_ENABLE_REQUEST_COUNTERS
-    uint64_t get_total = 0;
-    uint64_t set_total = 0;
-#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
-    uint64_t get_forwarded = 0;
-    uint64_t set_forwarded = 0;
-#endif
-#endif
-    request_latency_counters merged_latency;
+    HOTPATHLOGS({
+        uint64_t get_total = 0;
+        uint64_t set_total = 0;
+        uint64_t get_forwarded = 0;
+        uint64_t set_forwarded = 0;
+        request_latency_counters merged_latency;
 
-    for (unsigned sid = 0; sid < per_shard.size(); ++sid) {
-#if SHUNYAKV_ENABLE_REQUEST_COUNTERS
-        const auto &c = per_shard[sid].req;
-        get_total += c.get_total;
-        set_total += c.set_total;
-#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
-        get_forwarded += c.get_forwarded;
-        set_forwarded += c.set_forwarded;
-#endif
-#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
-        m_log.info("shard {} request counters: GET total={} forwarded={} | SET "
+        for (unsigned sid = 0; sid < per_shard.size(); ++sid) {
+            const auto &c = per_shard[sid].req;
+            get_total += c.get_total;
+            set_total += c.set_total;
+            get_forwarded += c.get_forwarded;
+            set_forwarded += c.set_forwarded;
+            m_log.info(
+                "shard {} request counters: GET total={} forwarded={} | SET "
+                "total={} forwarded={}",
+                sid, c.get_total, c.get_forwarded, c.set_total,
+                c.set_forwarded);
+            m_log.info("shard {} request counters: GET total={} | SET total={}",
+                       sid, c.get_total, c.set_total);
+            merged_latency.merge_from(per_shard[sid].latency);
+        }
+        m_log.info("cluster request counters: GET total={} forwarded={} | SET "
                    "total={} forwarded={}",
-                   sid, c.get_total, c.get_forwarded, c.set_total,
-                   c.set_forwarded);
-#else
-        m_log.info("shard {} request counters: GET total={} | SET total={}",
-                   sid, c.get_total, c.set_total);
-#endif
-#endif
-        merged_latency.merge_from(per_shard[sid].latency);
-    }
+                   get_total, get_forwarded, set_total, set_forwarded);
 
-#if SHUNYAKV_ENABLE_REQUEST_COUNTERS
-#if SHUNYAKV_ENABLE_FORWARDED_REQUEST_COUNTERS
-    m_log.info("cluster request counters: GET total={} forwarded={} | SET "
-               "total={} forwarded={}",
-               get_total, get_forwarded, set_total, set_forwarded);
-#else
-    m_log.info("cluster request counters: GET total={} | SET total={}",
-               get_total, set_total);
-#endif
+        m_log.info("cluster request counters: GET total={} | SET total={}",
+                   get_total, set_total);
 
-    const uint64_t total_ops = get_total + set_total;
-    const auto elapsed_s =
-        std::chrono::duration_cast<std::chrono::duration<double>>(
-            std::chrono::steady_clock::now() - run_start)
-            .count();
-    const double safe_elapsed_s = elapsed_s > 0.0 ? elapsed_s : 1.0;
-    const double qps = static_cast<double>(total_ops) / safe_elapsed_s;
-    const double get_qps = static_cast<double>(get_total) / safe_elapsed_s;
-    const double set_qps = static_cast<double>(set_total) / safe_elapsed_s;
-    m_log.info("cluster throughput: uptime_s={:.3f} total_ops={} "
-               "ops_per_sec={:.3f} get_qps={:.3f} set_qps={:.3f}",
-               elapsed_s, total_ops, qps, get_qps, set_qps);
-#elif SHUNYAKV_ENABLE_HOT_PATH_METRICS
-    const auto elapsed_s =
-        std::chrono::duration_cast<std::chrono::duration<double>>(
-            std::chrono::steady_clock::now() - run_start)
-            .count();
-    const double safe_elapsed_s = elapsed_s > 0.0 ? elapsed_s : 1.0;
-    const uint64_t total_ops = merged_latency.total.count;
-    const double ops_per_sec = static_cast<double>(total_ops) / safe_elapsed_s;
-    m_log.info("cluster throughput: uptime_s={:.3f} total_ops={} "
-               "ops_per_sec={:.3f}",
-               elapsed_s, total_ops, ops_per_sec);
-#else
-    const auto elapsed_s =
-        std::chrono::duration_cast<std::chrono::duration<double>>(
-            std::chrono::steady_clock::now() - run_start)
-            .count();
-    m_log.info("cluster throughput: uptime_s={:.3f} total_ops=unavailable "
-               "ops_per_sec=unavailable",
-               elapsed_s);
-#endif
+        const uint64_t total_ops = get_total + set_total;
+        const auto elapsed_s =
+            std::chrono::duration_cast<std::chrono::duration<double>>(
+                std::chrono::steady_clock::now() - run_start)
+                .count();
+        const double safe_elapsed_s = elapsed_s > 0.0 ? elapsed_s : 1.0;
+        const double qps = static_cast<double>(total_ops) / safe_elapsed_s;
+        const double get_qps = static_cast<double>(get_total) / safe_elapsed_s;
+        const double set_qps = static_cast<double>(set_total) / safe_elapsed_s;
+        m_log.info("cluster throughput: uptime_s={:.3f} total_ops={} "
+                   "ops_per_sec={:.3f} get_qps={:.3f} set_qps={:.3f}",
+                   elapsed_s, total_ops, qps, get_qps, set_qps);
 
-    const auto us_to_ms = [](uint64_t us) {
-        return static_cast<double>(us) / 1000.0;
-    };
-    const auto log_pct = [&](const char *label, const latency_histogram &h) {
-        m_log.info(
-            "{} n={} p50={:.3f}ms p90={:.3f}ms p99={:.3f}ms p99.9={:.3f}ms",
-            label, h.count, us_to_ms(h.quantile_us(0.50)),
-            us_to_ms(h.quantile_us(0.90)), us_to_ms(h.quantile_us(0.99)),
-            us_to_ms(h.quantile_us(0.999)));
-    };
+        const auto elapsed_s2 =
+            std::chrono::duration_cast<std::chrono::duration<double>>(
+                std::chrono::steady_clock::now() - run_start)
+                .count();
+        const double safe_elapsed_s2 = elapsed_s2 > 0.0 ? elapsed_s2 : 1.0;
+        const uint64_t total_ops2 = merged_latency.total.count;
+        const double ops_per_sec =
+            static_cast<double>(total_ops2) / safe_elapsed_s2;
+        m_log.info("cluster throughput: uptime_s={:.3f} total_ops={} "
+                   "ops_per_sec={:.3f}",
+                   elapsed_s2, total_ops2, ops_per_sec);
 
-    log_pct("OPS latency", merged_latency.total);
+        const auto elapsed_s3 =
+            std::chrono::duration_cast<std::chrono::duration<double>>(
+                std::chrono::steady_clock::now() - run_start)
+                .count();
+        m_log.info("cluster throughput: uptime_s={:.3f} total_ops=unavailable "
+                   "ops_per_sec=unavailable",
+                   elapsed_s3);
+        const auto us_to_ms = [](uint64_t us) {
+            return static_cast<double>(us) / 1000.0;
+        };
+        const auto log_pct = [&](const char *label,
+                                 const latency_histogram &h) {
+            m_log.info(
+                "{} n={} p50={:.3f}ms p90={:.3f}ms p99={:.3f}ms p99.9={:.3f}ms",
+                label, h.count, us_to_ms(h.quantile_us(0.50)),
+                us_to_ms(h.quantile_us(0.90)), us_to_ms(h.quantile_us(0.99)),
+                us_to_ms(h.quantile_us(0.999)));
+        };
+
+        log_pct("OPS latency", merged_latency.total);
+    });
+
     co_return;
 }
 
