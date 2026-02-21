@@ -203,7 +203,7 @@ seastar::future<> init() {
 }
 
 int main(int argc, char **argv) {
-    load_config_txt(config);
+    load_config_file(config);
     app_template app;
     app.add_options()("port",
                       boost::program_options::value<uint16_t>(&config.db_port)

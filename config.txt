@@ -1,3 +1,0 @@
-port=60111
-hash="fnv1a64"
-send_shard_details_on_connect=false

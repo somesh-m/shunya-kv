@@ -30,7 +30,7 @@ static inline bool parse_bool(std::string_view v, bool &out) {
     return false;
 }
 
-void load_config_txt(db_config &cfg, const char *path) {
+void load_config_file(db_config &cfg, const char *path) {
     namespace fs = std::filesystem;
 
     fs::path selected;
@@ -41,9 +41,9 @@ void load_config_txt(db_config &cfg, const char *path) {
 
     if (!in) {
         const fs::path requested(path);
-        if (!requested.is_absolute() && requested == "config.txt") {
+        if (!requested.is_absolute() && requested == "config.conf") {
             for (const fs::path &candidate :
-                 {fs::path("../config.txt"), fs::path("../../config.txt")}) {
+                 {fs::path("../config.conf"), fs::path("../../config.conf")}) {
                 in = std::ifstream(candidate);
                 if (in) {
                     selected = candidate;

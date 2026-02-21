@@ -5,6 +5,7 @@
 #include <resp/resp_types.hh>
 #include <resp/resp_writer.hh>
 
+#include "hotpath_metrics.hh"
 #include <charconv>
 #include <chrono>
 #include <seastar/core/coroutine.hh>
@@ -46,6 +47,10 @@ static bool ieq(const seastar::sstring &a, const char *b) {
     return true;
 }
 
+/**
+ * SET <KEY> <VALUE>
+ * SET <KEY> <VALUE> EX <TTL>
+ */
 seastar::future<> handle_set(const resp::Array &cmd,
                              seastar::output_stream<char> &out,
                              shunyakv::service &store) {
@@ -71,6 +76,10 @@ seastar::future<> handle_set(const resp::Array &cmd,
             co_await resp::write_error(out, "ERR syntax error (expected EX)");
             co_return;
         }
+
+        /* Convert the ttl from string to int and check of correctness and any
+           error code during convertsion
+        */
         uint64_t n = 0;
         const auto [ptr, ec] =
             std::from_chars(cmd[4].data(), cmd[4].data() + cmd[4].size(), n);
@@ -84,22 +93,21 @@ seastar::future<> handle_set(const resp::Array &cmd,
         co_await resp::write_error(out, "ERR syntax error");
         co_return;
     }
-#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
-    const auto start = std::chrono::steady_clock::now();
-#endif
+
+    HOTPATH_START(start);
 
     // Check shard
     unsigned sid =
         shunyakv::shard_for(std::string_view(key.data(), key.size()));
     const bool forwarded = (sid != seastar::this_shard_id());
-    store.record_set(forwarded);
     seastar::sstring value_str(value.data(), value.size());
     bool ok = false;
     if (!forwarded) {
         ok = co_await set_key_value(store, key, std::move(value_str), ttl_ms);
     } else {
-        // set_logger.info("Forwarding SET key='{}' from shard {} to shard {}",
-        //                 key, seastar::this_shard_id(), sid);
+        HOTPATHLOGS(
+            set_logger.info("Forwarding SET key='{}' from shard {} to shard {}",
+                            key, seastar::this_shard_id(), sid));
         ok = co_await seastar::smp::submit_to(
             sid, [key = seastar::sstring(key), value = std::move(value_str),
                   ttl_ms]() mutable {
@@ -114,14 +122,8 @@ seastar::future<> handle_set(const resp::Array &cmd,
         co_await resp::write_error(out, "NOT STORED");
         set_logger.info("NOT STORED {}", key);
     }
-#if SHUNYAKV_ENABLE_HOT_PATH_METRICS
-    const auto latency_us = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - start)
-            .count());
-    store.record_set_latency(latency_us);
-#endif
 
+    HOTPATH_END(start, store.record_set_latency);
     co_return;
 }
 
