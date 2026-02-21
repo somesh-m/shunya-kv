@@ -1,13 +1,12 @@
 #include "conn/resp_handler.hh"
-
 #include "commands.hh"
-#include "resp/resp_parser.hh"
-#include "resp/resp_writer.hh"
 #include "router.hh"
 
+#include "resp/resp_writer.hh"
 #include <algorithm>
-#include <string_view>
-#include <vector>
+#include <cstring> // memchr
+#include <resp/resp_parser.hh>
+
 #include <seastar/util/memory-data-sink.hh>
 
 namespace {
@@ -15,116 +14,278 @@ namespace {
 seastar::sstring
 buffer_vector_to_sstring(std::vector<seastar::temporary_buffer<char>> &bufs) {
     seastar::sstring out;
-    for (auto &b : bufs) {
+    for (auto &b : bufs)
         out.append(b.get(), b.size());
-    }
     return out;
 }
 
 bool ascii_ieq(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) {
+    if (a.size() != b.size())
         return false;
-    }
     for (size_t i = 0; i < a.size(); ++i) {
-        unsigned char ca = static_cast<unsigned char>(a[i]);
-        unsigned char cb = static_cast<unsigned char>(b[i]);
-        if ('a' <= ca && ca <= 'z') {
-            ca = static_cast<unsigned char>(ca - 'a' + 'A');
-        }
-        if ('a' <= cb && cb <= 'z') {
-            cb = static_cast<unsigned char>(cb - 'a' + 'A');
-        }
-        if (ca != cb) {
+        unsigned char ca = (unsigned char)a[i];
+        unsigned char cb = (unsigned char)b[i];
+        if ('a' <= ca && ca <= 'z')
+            ca = (unsigned char)(ca - 'a' + 'A');
+        if ('a' <= cb && cb <= 'z')
+            cb = (unsigned char)(cb - 'a' + 'A');
+        if (ca != cb)
             return false;
-        }
     }
     return true;
 }
 
-inline void compact_if_needed(seastar::sstring &buf, size_t &off) {
-    if (off == 0) {
-        return;
-    }
-    if (off >= buf.size()) {
-        buf = {};
-        off = 0;
-        return;
-    }
-    if (off >= 4096 || off * 2 >= buf.size()) {
-        buf = buf.substr(off);
-        off = 0;
-    }
-}
-
 } // namespace
-
-std::optional<seastar::sstring>
-RespHandler::try_extract_request(seastar::sstring &buf) {
-    if (_off >= buf.size()) {
-        buf = {};
-        _off = 0;
-        return std::nullopt;
-    }
-    if (buf.empty()) {
-        return std::nullopt;
-    }
-
-    std::string_view view(buf.data() + _off, buf.size() - _off);
-    size_t frame_len = 0;
-    switch (resp::parse_frame_length(view, frame_len)) {
-    case resp::frame_parse_status::ok: {
-        auto frame = buf.substr(_off, frame_len);
-        _off += frame_len;
-        compact_if_needed(buf, _off);
-        return frame;
-    }
-    case resp::frame_parse_status::need_more:
-        compact_if_needed(buf, _off);
-        return std::nullopt;
-    case resp::frame_parse_status::invalid: {
-        // Consume up to line-end so bad input does not stall the connection.
-        auto nl = view.find('\n');
-        if (nl == seastar::sstring::npos) {
-            auto bad = buf.substr(_off);
-            _off = buf.size();
-            compact_if_needed(buf, _off);
-            return bad;
-        }
-        auto bad = buf.substr(_off, nl + 1);
-        _off += nl + 1;
-        compact_if_needed(buf, _off);
-        return bad;
-    }
-    }
-    return std::nullopt;
-}
-
-seastar::future<seastar::sstring> RespHandler::handle_request(seastar::sstring req) {
+seastar::future<seastar::sstring>
+RespHandler::handle_request(shunyakv::ParsedRequest req) {
     try {
-        auto cmd = co_await resp::parse_command_from_frame(req);
-        if (cmd.empty()) {
-            co_return seastar::sstring("-ERR empty command\r\n");
+        // If extractor produced an immediate error response:
+        if (req.argv.empty() && !req.frame.empty() && req.frame[0] == '-') {
+            co_return std::move(req.frame);
         }
+        auto &cmd = req.argv;
+        if (cmd.empty())
+            co_return seastar::sstring("-ERR empty command\r\n");
 
         const auto &table = shunyakv::command_dispatch();
-        const auto it = std::find_if(
-            table.begin(), table.end(), [&](const auto &entry) {
+        const auto it =
+            std::find_if(table.begin(), table.end(), [&](const auto &entry) {
                 return ascii_ieq(cmd[0], entry.first);
             });
-        if (it == table.end()) {
+
+        if (it == table.end())
             co_return seastar::sstring("-ERR unknown command\r\n");
-        }
 
         std::vector<seastar::temporary_buffer<char>> bufs;
         seastar::output_stream<char> out(seastar::data_sink(
             std::make_unique<seastar::util::memory_data_sink>(bufs)));
-
-        co_await it->second(cmd, out, shunyakv::local_service());
-        co_await out.flush();
+        co_await it->second(cmd, out, shunyakv::local_service())
+            .finally([&out] {
+                return out.close().handle_exception([](std::exception_ptr) {});
+            });
         co_return buffer_vector_to_sstring(bufs);
     } catch (const std::exception &ex) {
-        co_return seastar::sstring("-ERR ") + seastar::sstring(ex.what()) + "\r\n";
+        co_return seastar::sstring("-ERR ") + seastar::sstring(ex.what()) +
+            "\r\n";
     } catch (...) {
         co_return seastar::sstring("-ERR internal error\r\n");
+    }
+}
+
+resp::frame_parse_status
+RespHandler::parse_int_crlf(const seastar::sstring &buf, int64_t &out) {
+    const char *base = buf.data();
+    const size_t n = buf.size();
+
+    if (_pos >= n)
+        return resp::frame_parse_status::need_more;
+
+    const char *p = base + _pos;
+    const char *end = base + n;
+
+    // find '\n'
+    const void *nl_ptr = memchr(p, '\n', (size_t)(end - p));
+    if (!nl_ptr)
+        return resp::frame_parse_status::need_more;
+
+    const char *nl = (const char *)nl_ptr;
+    if (nl == p)
+        return resp::frame_parse_status::invalid;
+    if (*(nl - 1) != '\r')
+        return resp::frame_parse_status::invalid;
+
+    // parse integer in [p, nl-1)
+    const char *q = p;
+    bool neg = false;
+    if (*q == '-') {
+        neg = true;
+        ++q;
+    }
+    if (q == nl - 1)
+        return resp::frame_parse_status::invalid;
+
+    int64_t v = 0;
+    for (; q < nl - 1; ++q) {
+        unsigned d = (unsigned)(*q - '0');
+        if (d > 9)
+            return resp::frame_parse_status::invalid;
+        v = v * 10 + (int64_t)d;
+    }
+    out = neg ? -v : v;
+
+    _pos = (size_t)((nl - base) + 1); // past '\n'
+    return resp::frame_parse_status::ok;
+}
+
+std::optional<shunyakv::ParsedRequest>
+RespHandler::try_extract_request(seastar::sstring &buf) {
+    const size_t n = buf.size();
+    if (_pos > n) {
+        _pos = n;
+    } // safety
+
+    while (true) {
+        const size_t n = buf.size();
+
+        switch (_st) {
+        case st::need_star: {
+            if (_pos >= n) {
+                if (_st == st::need_star) {
+                    compact_if_needed(buf, _pos);
+                }
+                return std::nullopt;
+            }
+            if (buf[_pos] != '*') {
+                // invalid: consume to '\n' to avoid stalling
+                auto view = std::string_view(buf.data() + _pos, n - _pos);
+                auto nl = view.find('\n');
+                if (nl == std::string_view::npos) {
+                    _pos = n;
+                } else {
+                    _pos += nl + 1;
+                }
+                if (_st == st::need_star) {
+                    compact_if_needed(buf, _pos);
+                }
+                return shunyakv::ParsedRequest{
+                    seastar::sstring("-ERR protocol error\r\n"), {}};
+            }
+            _cmd_start = _pos;
+            ++_pos;
+            _st = st::need_argc;
+            break;
+        }
+
+        case st::need_argc: {
+            int64_t argc = 0;
+            auto stt = parse_int_crlf(buf, argc);
+            if (stt != resp::frame_parse_status::ok) {
+                if (stt == resp::frame_parse_status::need_more) {
+                    if (_st == st::need_argc) {
+                        compact_if_needed(buf, _pos);
+                    }
+                    return std::nullopt;
+                }
+                // invalid line
+                _st = st::need_star;
+                return shunyakv::ParsedRequest{
+                    seastar::sstring("-ERR protocol error\r\n"), {}};
+            }
+            if (argc <= 0 || (size_t)argc > kMaxArgs) {
+                _st = st::need_star;
+                return shunyakv::ParsedRequest{
+                    seastar::sstring("-ERR invalid argc\r\n"), {}};
+            }
+            _argc = argc;
+            _argi = 0;
+            _slices.clear();
+            _slices.reserve((size_t)argc);
+            _st = st::need_dollar;
+            break;
+        }
+
+        case st::need_dollar: {
+            if (_pos >= n) {
+                if (_st == st::need_dollar) {
+                    compact_if_needed(buf, _pos);
+                }
+                return std::nullopt;
+            }
+            if (buf[_pos] != '$') {
+                _st = st::need_star;
+                return shunyakv::ParsedRequest{
+                    seastar::sstring("-ERR protocol error\r\n"), {}};
+            }
+            ++_pos;
+            _st = st::need_bulk_len;
+            break;
+        }
+
+        case st::need_bulk_len: {
+            int64_t bl = 0;
+            auto stt = parse_int_crlf(buf, bl);
+            if (stt != resp::frame_parse_status::ok) {
+                if (stt == resp::frame_parse_status::need_more) {
+                    if (_st == st::need_bulk_len) {
+                        compact_if_needed(buf, _pos);
+                    }
+                    return std::nullopt;
+                }
+                _st = st::need_star;
+                return shunyakv::ParsedRequest{
+                    seastar::sstring("-ERR protocol error\r\n"), {}};
+            }
+            if (bl < 0 || (size_t)bl > kMaxBulk) {
+                _st = st::need_star;
+                return shunyakv::ParsedRequest{
+                    seastar::sstring("-ERR invalid bulk length\r\n"), {}};
+            }
+            _bulk_len = bl;
+            _st = st::need_bulk_data;
+            break;
+        }
+
+        case st::need_bulk_data: {
+            const size_t bl = (size_t)_bulk_len;
+            if (_pos + bl > n) {
+                if (_st == st::need_bulk_data) {
+                    compact_if_needed(buf, _pos);
+                }
+                return std::nullopt;
+            }
+            _slices.push_back(slice{(uint32_t)_pos, (uint32_t)bl});
+            _pos += bl;
+            _st = st::need_bulk_crlf;
+            break;
+        }
+
+        case st::need_bulk_crlf: {
+            if (_pos + 2 > n) {
+                if (_st == st::need_bulk_crlf) {
+                    compact_if_needed(buf, _pos);
+                }
+                return std::nullopt;
+            }
+            if (buf[_pos] != '\r' || buf[_pos + 1] != '\n') {
+                _st = st::need_star;
+                return shunyakv::ParsedRequest{
+                    seastar::sstring("-ERR protocol error\r\n"), {}};
+            }
+            _pos += 2;
+
+            ++_argi;
+            if (_argi == _argc) {
+                // command complete: build owning frame + argv views (no second
+                // parse)
+                const size_t frame_len = _pos - _cmd_start;
+                seastar::sstring frame =
+                    buf.substr(_cmd_start, frame_len); // copy once
+
+                resp::ArgvView argv;
+                argv.reserve(_slices.size());
+                for (const auto &sl : _slices) {
+                    const size_t rel_off = (size_t)sl.off - _cmd_start;
+                    argv.emplace_back(std::string_view(frame.data() + rel_off,
+                                                       (size_t)sl.len));
+                }
+
+                // reset parser for next command
+                _st = st::need_star;
+
+                // consume prefix up to _pos
+                // easiest: compact buffer to drop consumed bytes
+                // (note: _pos is absolute)
+                if (_st == st::need_star) {
+                    compact_if_needed(buf, _pos);
+                }
+
+                return shunyakv::ParsedRequest{std::move(frame),
+                                               std::move(argv)};
+            }
+
+            _st = st::need_dollar;
+            break;
+        }
+        }
     }
 }

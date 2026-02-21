@@ -27,7 +27,7 @@ get_key_value(shunyakv::service &store, std::string_view key) {
 
 } // namespace
 
-seastar::future<> handle_get(const resp::Array &cmd,
+seastar::future<> handle_get(const resp::ArgvView &cmd,
                              seastar::output_stream<char> &out,
                              shunyakv::service &store) {
     // cmd[0] == "GET"

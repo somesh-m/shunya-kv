@@ -1,12 +1,15 @@
 #include "conn/socket_handler.hh"
 #include "cmd_node_info.hh"
 #include "conn/connections.hh"
+#include "hotpath_metrics.hh"
 #include <chrono>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future-util.hh>
 #include <seastar/core/when_all.hh>
 #include <seastar/util/log.hh>
 #include <utility>
+
+static seastar::logger socket_logger{"socket_logger"};
 
 namespace shunyakv {
 thread_local bool g_send_shard_details_on_connect = false;
@@ -28,7 +31,7 @@ static seastar::future<> send_shard_details(shunyakv::connection &c) {
     co_await out.flush();
 }
 
-std::optional<seastar::sstring>
+std::optional<shunyakv::ParsedRequest>
 PipelinedSocketHandler::try_extract_request(seastar::sstring &buf) {
     auto pos = buf.find('\n');
     if (pos == seastar::sstring::npos) {
@@ -40,7 +43,7 @@ PipelinedSocketHandler::try_extract_request(seastar::sstring &buf) {
     if (!req.empty() && req.back() == '\r') {
         req = req.substr(0, req.size() - 1);
     }
-    return req;
+    return shunyakv::ParsedRequest{std::move(req), {}};
 }
 
 seastar::future<> PipelinedSocketHandler::read_loop(shunyakv::connection &c) {
@@ -55,18 +58,22 @@ seastar::future<> PipelinedSocketHandler::read_loop(shunyakv::connection &c) {
             }
 
             buffer.append(chunk.get(), chunk.size());
+            size_t drained = 0;
 
             while (true) {
+                HOTPATHLOGS(socket_logger.info(
+                    "trying to extract request = {} ", buffer));
                 auto req_opt = try_extract_request(buffer);
-                if (!req_opt) {
+                if (!req_opt)
                     break;
-                }
 
                 co_await _slots.wait(1);
                 _respq.push_back(handle_request(std::move(*req_opt)));
                 _cv.signal();
-                // Prevent long non-yield parsing bursts from stalling reactor.
-                co_await seastar::maybe_yield();
+
+                if ((++drained & 0xFF) == 0) { // every 256
+                    co_await seastar::maybe_yield();
+                }
             }
         }
     } catch (...) {
@@ -123,8 +130,26 @@ seastar::future<> PipelinedSocketHandler::write_loop(shunyakv::connection &c) {
 }
 
 seastar::future<> PipelinedSocketHandler::process(shunyakv::connection &c) {
+    std::exception_ptr ep;
     if (shunyakv::g_send_shard_details_on_connect) {
-        co_await send_shard_details(c);
+        try {
+            co_await send_shard_details(c);
+        } catch (...) {
+            ep = std::current_exception();
+        }
     }
-    co_await seastar::when_all(read_loop(c), write_loop(c));
+    if (!ep) {
+        try {
+            co_await seastar::when_all(read_loop(c), write_loop(c));
+        } catch (...) {
+            ep = std::current_exception();
+        }
+    }
+
+    co_await c.out().close().handle_exception([](std::exception_ptr) {});
+    co_await c.in().close().handle_exception([](std::exception_ptr) {});
+
+    if (ep) {
+        std::rethrow_exception(ep);
+    }
 }

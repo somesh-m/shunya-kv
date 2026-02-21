@@ -30,7 +30,7 @@ seastar::future<bool> set_key_value(shunyakv::service &store,
 
 } // namespace
 
-static bool ieq(const seastar::sstring &a, const char *b) {
+static bool ieq(const std::string_view &a, const char *b) {
     // simple ASCII case-insensitive compare for tiny tokens like "EX"
     if (a.size() != std::strlen(b))
         return false;
@@ -51,7 +51,7 @@ static bool ieq(const seastar::sstring &a, const char *b) {
  * SET <KEY> <VALUE>
  * SET <KEY> <VALUE> EX <TTL>
  */
-seastar::future<> handle_set(const resp::Array &cmd,
+seastar::future<> handle_set(const resp::ArgvView &cmd,
                              seastar::output_stream<char> &out,
                              shunyakv::service &store) {
     // cmd[0] == "SET"

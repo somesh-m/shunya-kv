@@ -102,7 +102,7 @@ seastar::sstring compute_hash(uint16_t sid) {
     return json;
 }
 
-uint16_t parse_u16(const seastar::sstring &s) {
+uint16_t parse_u16(const std::string_view &s) {
     if (s.empty()) {
         throw std::runtime_error("invalid shard id: empty");
     }

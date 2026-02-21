@@ -10,8 +10,9 @@
 #include <unordered_map>
 
 namespace shunyakv {
-using Handler = std::function<seastar::future<>(
-    const resp::Array &, seastar::output_stream<char> &, shunyakv::service &)>;
+using Handler = std::function<seastar::future<>(const resp::ArgvView &,
+                                                seastar::output_stream<char> &,
+                                                shunyakv::service &)>;
 
 const std::unordered_map<std::string_view, Handler> &command_dispatch();
 } // namespace shunyakv

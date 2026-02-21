@@ -3,7 +3,7 @@
 #include <resp/resp_types.hh>
 
 namespace shunyakv {
-seastar::future<> handle_node_info(const resp::Array &cmd,
+seastar::future<> handle_node_info(const resp::ArgvView &cmd,
                                    seastar::output_stream<char> &out,
                                    shunyakv::service &svc);
 
@@ -30,7 +30,7 @@ void set_node_cfg(const node_cfg &);
 // Equal contiguous ranges over the 64-bit hash space for *data* shards
 seastar::sstring compute_hash_ranges();
 seastar::sstring compute_hash(uint16_t shard_no);
-uint16_t parse_u16(const seastar::sstring &s);
+uint16_t parse_u16(const std::string_view &s);
 // Utility: port for a shard id, consistent with your mapping
 inline uint16_t port_for_shard(unsigned sid) {
     // data ports are base_port + (sid - first_data_shard) + 1

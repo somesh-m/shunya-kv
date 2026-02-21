@@ -5,7 +5,7 @@
 #include <seastar/core/future.hh>
 
 namespace shunyakv {
-seastar::future<> handle_quit(const resp::Array &cmd /*rest*/,
+seastar::future<> handle_quit(const resp::ArgvView &cmd /*rest*/,
                               seastar::output_stream<char> &out,
                               shunyakv::service & /*svc*/) {
     // We just say bye; the server loop will see QUIT succeeded and close the

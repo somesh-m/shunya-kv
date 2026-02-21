@@ -11,7 +11,7 @@ node_cfg g_node_cfg{}; // single definition
 
 void set_node_cfg(const node_cfg &c) { g_node_cfg = c; }
 
-static bool ieq(const seastar::sstring &a, const char *b) {
+static bool ieq(const std::string_view &a, const char *b) {
     if (a.size() != std::strlen(b))
         return false;
     for (size_t i = 0; i < a.size(); i++) {
@@ -27,7 +27,7 @@ static bool ieq(const seastar::sstring &a, const char *b) {
     return true;
 }
 
-seastar::future<> handle_node_info(const resp::Array &cmd,
+seastar::future<> handle_node_info(const resp::ArgvView &cmd,
                                    seastar::output_stream<char> &out,
                                    shunyakv::service & /*svc*/) {
 

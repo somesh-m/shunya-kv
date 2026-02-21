@@ -39,10 +39,10 @@ inline bool insert_with_growth_trace(
 } // namespace
 
 seastar::future<> store::start(unsigned) {
+    /**
+     * Reserve a large amount here so that it doesn't reallocate while the db is running.
+     */
     _map.reserve(27000'00);
-    kv_store_log.info("store instance on shard {}: this={}, map={}",
-                      seastar::this_shard_id(), static_cast<const void *>(this),
-                      static_cast<const void *>(&_map));
     co_return;
 }
 

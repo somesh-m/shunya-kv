@@ -3,7 +3,7 @@
 #include <resp/resp_types.hh>
 
 namespace shunyakv {
-seastar::future<> handle_set(const resp::Array &cmd,
+seastar::future<> handle_set(const resp::ArgvView &cmd,
                              seastar::output_stream<char> &out,
                              shunyakv::service &svc);
 }

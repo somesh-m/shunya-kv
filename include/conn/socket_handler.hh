@@ -1,6 +1,9 @@
 #pragma once
 
 #include <optional>
+#include <resp/resp_types.hh>
+#include <string_view>
+#include <vector>
 
 #include <seastar/core/circular_buffer.hh>
 #include <seastar/core/condition-variable.hh>
@@ -9,9 +12,13 @@
 #include <seastar/core/sstring.hh>
 
 namespace shunyakv {
+struct ParsedRequest {
+    seastar::sstring frame; // owns bytes (optional)
+    resp::ArgvView argv;
+};
 class connection;
 void set_send_shard_details_on_connect(bool enabled) noexcept;
-}
+} // namespace shunyakv
 
 class SocketHandler {
   public:
@@ -34,10 +41,10 @@ class PipelinedSocketHandler : public SocketHandler {
     // Parse & schedule a response for ONE complete message (line/resp
     // frame/etc.)
     virtual seastar::future<seastar::sstring>
-    handle_request(seastar::sstring req) = 0;
+    handle_request(shunyakv::ParsedRequest req) = 0;
 
-    virtual std::optional<seastar::sstring>
-    try_extract_request(seastar::sstring &buf);
+    virtual std::optional<shunyakv::ParsedRequest>
+    try_extract_request(seastar::sstring &buf) = 0;
 
   public:
     seastar::future<> process(shunyakv::connection &c) override;
