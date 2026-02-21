@@ -78,6 +78,8 @@ file(GLOB_RECURSE SHUNYA_SOURCES CONFIGURE_DEPENDS
 # Keep currently disabled sources excluded from the server target.
 list(FILTER SHUNYA_SOURCES EXCLUDE REGEX ".*/metrics_logger\\.cc$")
 list(FILTER SHUNYA_SOURCES EXCLUDE REGEX ".*/service\\.cc$")
+list(FILTER SHUNYA_SOURCES EXCLUDE REGEX ".*/server\\.cc$")
+
 
 
 if (BUILD_SERVER)
