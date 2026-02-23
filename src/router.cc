@@ -19,8 +19,7 @@ future<bool> service::local_set(std::string_view key, sstring value,
 }
 
 future<std::optional<sstring>> service::local_get(std::string_view key) const {
-    key_t k{key.data(), key.size()};
-    return _store.get(k);
+    return _store.get(key);
 }
 
 void service::record_set(bool forwarded) noexcept {

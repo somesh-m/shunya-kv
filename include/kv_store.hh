@@ -3,6 +3,7 @@
 #include "kv_types.hh"
 #include <absl/container/flat_hash_map.h>
 #include <seastar/core/future.hh>
+#include <string_view>
 /**
  * Each shard is supposed to have it's own copy of store
  */
@@ -21,7 +22,7 @@ class store {
     /**
      * GET <key> <value>
      */
-    future<std::optional<sstring>> get(const key_t &key) const;
+    future<std::optional<sstring>> get(std::string_view key) const;
 
     /**
      * SET <key> <value> EX <ttl>

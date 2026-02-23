@@ -1,4 +1,5 @@
 #include "kv_store.hh"
+#include "hotpath_metrics.hh"
 #include <chrono>
 #include <coroutine>
 #include <seastar/core/coroutine.hh>
@@ -10,9 +11,9 @@ namespace shunyakv {
 static seastar::logger kv_store_log{"kv_store"};
 
 namespace {
-inline bool insert_with_growth_trace(
-    absl::flat_hash_map<key_t, seastar::sstring> &map,
-    key_t key, seastar::sstring value) {
+inline bool
+insert_with_growth_trace(absl::flat_hash_map<key_t, seastar::sstring> &map,
+                         key_t key, seastar::sstring value) {
     const auto before_size = map.size();
     const auto before_buckets = map.bucket_count();
     const auto t0 = std::chrono::steady_clock::now();
@@ -40,7 +41,8 @@ inline bool insert_with_growth_trace(
 
 seastar::future<> store::start(unsigned) {
     /**
-     * Reserve a large amount here so that it doesn't reallocate while the db is running.
+     * Reserve a large amount here so that it doesn't reallocate while the db is
+     * running.
      */
     _map.reserve(27000'00);
     co_return;
@@ -54,17 +56,20 @@ seastar::future<> store::stop() {
 }
 
 seastar::future<bool> store::set(key_t key, seastar::sstring value) {
-    co_return insert_with_growth_trace(_map, std::move(key), std::move(value));
+    _map[std::move(key)] = std::move(value);
+    co_return true;
 }
 
 seastar::future<bool> store::set_with_ttl(key_t key, seastar::sstring value,
                                           uint64_t) {
-    co_return insert_with_growth_trace(_map, std::move(key), std::move(value));
+    _map[std::move(key)] = std::move(value);
+    // TODO: Handle TTL
+    co_return true;
 }
 
 seastar::future<std::optional<seastar::sstring>>
-store::get(const key_t &key) const {
-    auto it = _map.find(key);
+store::get(std::string_view key) const {
+    auto it = _map.find(key_t{key.data(), key.size()});
     if (it == _map.end()) {
         co_return std::nullopt;
     }
