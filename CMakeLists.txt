@@ -154,4 +154,5 @@ target_link_libraries(shunya_test PRIVATE
 )
 include(GoogleTest)
 gtest_discover_tests(shunya_test)
+add_subdirectory(tests/unit)
 endif()
