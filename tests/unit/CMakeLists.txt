@@ -91,3 +91,41 @@ add_test(NAME GET_TEST_OVERWRITE_EXISTING
 add_test(NAME GET_TEST_LARGE_VALUE
   COMMAND cmd_get_unit_test --run_test=GET_TEST_LARGE_VALUE
 )
+
+add_executable(cmd_node_info_unit_test
+  cmd_node_info_test.cc
+  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
+  ${SHUNYA_SRC_DIR}/node_info_helpers.cc
+  ${SHUNYA_SRC_DIR}/router.cc
+  ${SHUNYA_SRC_DIR}/kv_store.cc
+  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
+)
+
+target_include_directories(cmd_node_info_unit_test PRIVATE
+  ${SHUNYA_INCLUDE_DIR}
+  ${SHUNYA_SRC_DIR}
+  ${CMAKE_SOURCE_DIR}/third_party/fnv
+)
+
+target_link_libraries(cmd_node_info_unit_test PRIVATE
+  Seastar::seastar_testing
+  fmt::fmt
+  absl::flat_hash_map
+  fnv_ref
+)
+
+target_compile_definitions(cmd_node_info_unit_test PRIVATE
+  SEASTAR_TESTING_MAIN
+)
+
+add_test(NAME NODE_INFO_MAP_TEST
+  COMMAND cmd_node_info_unit_test --run_test=NODE_INFO_MAP_TEST
+)
+
+add_test(NAME NODE_INFO_CURRENT_CONN_TEST
+  COMMAND cmd_node_info_unit_test --run_test=NODE_INFO_CURRENT_CONN_TEST
+)
+
+add_test(NAME NODE_INFO_OTHER_NODE_TEST
+  COMMAND cmd_node_info_unit_test --run_test=NODE_INFO_OTHER_NODE_TEST
+)
