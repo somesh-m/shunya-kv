@@ -1,7 +1,9 @@
 // kv_store.hh
 #pragma once
 #include "kv_types.hh"
+#include "ttl/entry.hh"
 #include <absl/container/flat_hash_map.h>
+#include <optional>
 #include <seastar/core/future.hh>
 #include <string_view>
 /**
@@ -30,6 +32,6 @@ class store {
     future<bool> set_with_ttl(key_t key, sstring value, uint64_t ttl);
 
   private:
-    absl::flat_hash_map<key_t, seastar::sstring> _map;
+    absl::flat_hash_map<key_t, ttl::Entry> _map;
 };
 } // namespace shunyakv

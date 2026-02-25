@@ -46,6 +46,17 @@ add_test(NAME SET_TEST_LARGE_KEY
 add_test(NAME SET_TEST_LARGE_VALUE
   COMMAND cmd_set_unit_test --run_test=SET_TEST_LARGE_VALUE)
 
+add_test(NAME SET_TEST_TTL_VALID
+  COMMAND cmd_set_unit_test --run_test=SET_TEST_TTL_VALID)
+
+add_test(NAME SET_TEST_TTL_NON_NUMERIC_ARGS
+  COMMAND cmd_set_unit_test --run_test=SET_TEST_TTL_NON_NUMERIC_ARGS)
+
+add_test(NAME SET_TEST_TTL_REFRESH_ON_OVERWRITE
+  COMMAND cmd_set_unit_test --run_test=SET_TEST_TTL_REFRESH_ON_OVERWRITE)
+
+add_test(NAME SET_TEST_TTL_SET_WITHOUT_TTL_OVERWRITE
+  COMMAND cmd_set_unit_test --run_test=SET_TEST_TTL_SET_WITHOUT_TTL_OVERWRITE)
 
 add_executable(cmd_get_unit_test
   cmd_get_test.cc
@@ -90,6 +101,14 @@ add_test(NAME GET_TEST_OVERWRITE_EXISTING
 
 add_test(NAME GET_TEST_LARGE_VALUE
   COMMAND cmd_get_unit_test --run_test=GET_TEST_LARGE_VALUE
+)
+
+add_test(NAME GET_TEST_INVALID_KEY
+  COMMAND cmd_get_unit_test --run_test=GET_TEST_INVALID_KEY
+)
+
+add_test(NAME GET_TEST_TTL_VALID
+  COMMAND cmd_get_unit_test --run_test=GET_TEST_TTL_VALID
 )
 
 add_executable(cmd_node_info_unit_test

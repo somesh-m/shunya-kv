@@ -1,6 +1,7 @@
 #include "cmd_get.hh"
 #include "hash.hh"
 #include "router.hh"
+#include <seastar/core/sleep.hh>
 #include <seastar/testing/test_case.hh>
 #include <seastar/util/memory-data-sink.hh>
 
@@ -13,6 +14,8 @@ using OutputStream = seastar::output_stream<char>;
 
 std::string get_value(uint64_t);
 future<bool> perform_local_set(std::string, std::string);
+future<bool> perform_local_set(std::string, std::string,
+                               std::optional<uint32_t> ttl_sec);
 std::string get_resp_eq(std::string);
 
 struct TestOut {
@@ -63,6 +66,20 @@ SEASTAR_TEST_CASE(GET_TEST_INVALID_ARGS) {
     BOOST_REQUIRE_EQUAL(reply, "-ERR wrong number of arguments for 'GET'\r\n");
 }
 
+SEASTAR_TEST_CASE(GET_TEST_INVALID_KEY) {
+    std::string key = "non_existent_key";
+    std::string resp_value_string = "$-1\r\n";
+    const resp::ArgvView cmd{"get", key};
+
+    auto o = make_out();
+
+    co_await handle_get(cmd, o.out, local_service());
+    co_await o.out.close();
+
+    auto reply = bufs_to_sstring(o.bufs);
+    BOOST_REQUIRE_EQUAL(reply, resp_value_string);
+}
+
 SEASTAR_TEST_CASE(GET_TEST_SHARD_HOPPING) {
     std::string key;
     std::string value = "test";
@@ -107,6 +124,32 @@ SEASTAR_TEST_CASE(GET_TEST_OVERWRITE_EXISTING) {
     co_await o1.out.close();
     std::string reply1 = bufs_to_sstring(o1.bufs);
     BOOST_REQUIRE_EQUAL(reply1, get_resp_eq(value_b));
+}
+
+SEASTAR_TEST_CASE(GET_TEST_TTL_VALID) {
+    std::string key = "name";
+    std::string expected_value = "test";
+    std::string resp_value_string = get_resp_eq(expected_value);
+    const resp::ArgvView cmd{"get", key};
+
+    auto o = make_out();
+    // insert the key value first
+    co_await perform_local_set(key, expected_value, 5);
+
+    co_await handle_get(cmd, o.out, local_service());
+    co_await o.out.close();
+
+    auto reply = bufs_to_sstring(o.bufs);
+    BOOST_REQUIRE_EQUAL(reply, resp_value_string);
+
+    co_await sleep(std::chrono::seconds(7));
+
+    auto o1 = make_out();
+    co_await handle_get(cmd, o1.out, local_service());
+    co_await o1.out.close();
+
+    auto reply1 = bufs_to_sstring(o1.bufs);
+    BOOST_REQUIRE_EQUAL(reply1, "$-1\r\n");
 }
 
 SEASTAR_TEST_CASE(GET_TEST_LARGE_VALUE) {
@@ -155,13 +198,27 @@ std::string get_resp_eq(std::string value) {
 std::string get_value(uint64_t size) { return std::string(size, 'a'); }
 
 future<bool> perform_local_set(std::string key, std::string value) {
+    return perform_local_set(std::move(key), std::move(value), std::nullopt);
+}
+
+future<bool> perform_local_set(std::string key, std::string value,
+                               std::optional<uint32_t> ttl_sec) {
     const auto sid = shard_for(key);
     if (sid == this_shard_id()) {
-        co_return co_await local_service().local_set(key, value);
+        if (!ttl_sec)
+            co_return co_await local_service().local_set(key, value);
+
+        co_return co_await local_service().local_set(
+            key, value, static_cast<uint64_t>(*ttl_sec));
     }
     co_return co_await smp::submit_to(
-        sid, [k = seastar::sstring(std::move(key)),
-              v = seastar::sstring(std::move(value))] {
-            return local_service().local_set(k, v);
+        sid,
+        [k = seastar::sstring(std::move(key)),
+         v = seastar::sstring(std::move(value)), ttl_sec = std::move(ttl_sec)] {
+            if (!ttl_sec)
+                return local_service().local_set(k, v);
+
+            return local_service().local_set(k, v,
+                                             static_cast<uint64_t>(*ttl_sec));
         });
 }

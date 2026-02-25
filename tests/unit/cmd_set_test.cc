@@ -1,6 +1,7 @@
 #include "cmd_set.hh"
 #include "hash.hh"
 #include "router.hh"
+#include <seastar/core/sleep.hh>
 #include <seastar/testing/test_case.hh>
 #include <seastar/util/memory-data-sink.hh>
 
@@ -118,17 +119,122 @@ SEASTAR_TEST_CASE(SET_TEST_OVERWRITE_EXISTING) {
     BOOST_REQUIRE_EQUAL(reply, "+OK\r\n");
 }
 
-// SEASTAR_TEST_CASE(SET_TEST_TTL_VALID) {}
+SEASTAR_TEST_CASE(SET_TEST_TTL_VALID) {
+    const resp::ArgvView cmd{"set", "name", "test", "ex", "5"};
 
-// SEASTAR_TEST_CASE(SET_TEST_TTL_INVALID_ARGS) {}
+    auto o = make_out();
+    co_await handle_set(cmd, o.out, local_service());
+    co_await o.out.close();
 
-// SEASTAR_TEST_CASE(SET_TEST_TTL_NON_NUMERIC_ARGS) {}
+    const auto sid = shard_for("name");
+    auto value = (sid == this_shard_id())
+                     ? co_await local_service().local_get("name")
+                     : co_await smp::submit_to(sid, [] {
+                           return local_service().local_get("name");
+                       });
+    BOOST_REQUIRE(value.has_value());
+    BOOST_REQUIRE_EQUAL(*value, "test");
 
-// SEASTAR_TEST_CASE(SET_TEST_TTL_REFRESH_ON_OVERWRITE) {}
+    co_await sleep(std::chrono::seconds(6));
+    value = (sid == this_shard_id())
+                ? co_await local_service().local_get("name")
+                : co_await smp::submit_to(
+                      sid, [] { return local_service().local_get("name"); });
+    BOOST_REQUIRE(!value.has_value());
+}
 
-// SEASTAR_TEST_CASE(SET_TEST_TTL_SET_WITHOUT_TTL_OVERWRITE) {}
+SEASTAR_TEST_CASE(SET_TEST_TTL_NON_NUMERIC_ARGS) {
+    const resp::ArgvView cmd{"set", "name", "test", "ex", "five"};
 
-// SEASTAR_TEST_CASE(SET_TEST_TTL_SHARD_HOPPING) {}
+    auto o = make_out();
+    co_await handle_set(cmd, o.out, local_service());
+    co_await o.out.close();
+    std::string reply = bufs_to_sstring(o.bufs);
+
+    BOOST_REQUIRE_EQUAL(reply, "-ERR invalid expire time\r\n");
+}
+
+/**
+ *
+ */
+SEASTAR_TEST_CASE(SET_TEST_TTL_REFRESH_ON_OVERWRITE) {
+    const resp::ArgvView cmd{"set", "name", "test", "ex", "5"};
+    const resp::ArgvView cmd_re{"set", "name", "test_2", "ex", "10"};
+
+    auto o = make_out();
+    co_await handle_set(cmd, o.out, local_service());
+    co_await o.out.close();
+
+    const auto sid = shard_for("name");
+    auto value = (sid == this_shard_id())
+                     ? co_await local_service().local_get("name")
+                     : co_await smp::submit_to(sid, [] {
+                           return local_service().local_get("name");
+                       });
+    BOOST_REQUIRE(value.has_value());
+    BOOST_REQUIRE_EQUAL(*value, "test");
+
+    auto o1 = make_out();
+    co_await handle_set(cmd_re, o.out, local_service());
+    co_await o.out.close();
+
+    value = (sid == this_shard_id())
+                ? co_await local_service().local_get("name")
+                : co_await smp::submit_to(
+                      sid, [] { return local_service().local_get("name"); });
+    BOOST_REQUIRE(value.has_value());
+    BOOST_REQUIRE_EQUAL(*value, "test_2");
+
+    co_await sleep(std::chrono::seconds(6));
+    value = (sid == this_shard_id())
+                ? co_await local_service().local_get("name")
+                : co_await smp::submit_to(
+                      sid, [] { return local_service().local_get("name"); });
+    BOOST_REQUIRE(value.has_value());
+
+    co_await sleep(std::chrono::seconds(11));
+    value = (sid == this_shard_id())
+                ? co_await local_service().local_get("name")
+                : co_await smp::submit_to(
+                      sid, [] { return local_service().local_get("name"); });
+    BOOST_REQUIRE(!value.has_value());
+}
+
+SEASTAR_TEST_CASE(SET_TEST_TTL_SET_WITHOUT_TTL_OVERWRITE) {
+    const resp::ArgvView cmd{"set", "name", "test", "ex", "6"};
+    const resp::ArgvView cmd_re{"set", "name", "test_2"};
+
+    auto o = make_out();
+    co_await handle_set(cmd, o.out, local_service());
+    co_await o.out.close();
+
+    const auto sid = shard_for("name");
+    auto value = (sid == this_shard_id())
+                     ? co_await local_service().local_get("name")
+                     : co_await smp::submit_to(sid, [] {
+                           return local_service().local_get("name");
+                       });
+    BOOST_REQUIRE(value.has_value());
+    BOOST_REQUIRE_EQUAL(*value, "test");
+
+    auto o1 = make_out();
+    co_await handle_set(cmd_re, o.out, local_service());
+    co_await o.out.close();
+
+    value = (sid == this_shard_id())
+                ? co_await local_service().local_get("name")
+                : co_await smp::submit_to(
+                      sid, [] { return local_service().local_get("name"); });
+    BOOST_REQUIRE(value.has_value());
+    BOOST_REQUIRE_EQUAL(*value, "test_2");
+
+    co_await sleep(std::chrono::seconds(7));
+    value = (sid == this_shard_id())
+                ? co_await local_service().local_get("name")
+                : co_await smp::submit_to(
+                      sid, [] { return local_service().local_get("name"); });
+    BOOST_REQUIRE(!value.has_value());
+}
 
 SEASTAR_TEST_CASE(SET_TEST_EMPTY_VALUE) {
     const resp::ArgvView cmd{"set", "name", ""};

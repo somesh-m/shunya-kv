@@ -34,7 +34,7 @@ class TtlCache {
     static bool is_expired(uint64_t now, uint64_t expires_at) {
         return now >= expires_at;
     }
-
+    
     std::unordered_map<std::string, Entry> kv_;
     std::priority_queue<HeapNode, std::vector<HeapNode>, MinExpiry> pq_;
 
