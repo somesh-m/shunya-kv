@@ -15,37 +15,23 @@ jobs:
   build-and-test:
     runs-on: ubuntu-24.04
 
+    permissions:
+      contents: read
+      packages: read
+
+    container:
+      image: ghcr.io/somesh-m/shunyakv-ci:latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free disk space
+      - name: Build + Test
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/.ghcup
-          sudo apt-get clean
-          docker system prune -af || true
-
-      - name: Check disk space
-        run: df -h
-
-      - name: Build CI docker image
-        run: |
-          docker build -f Dockerfile.ci -t shunyakv-ci.local:latest .
-
-      - name: Build + Test (inside container)
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/w" -w /w \
-            shunyakv-ci.local:latest \
-            bash -lc '
-              rm -rf build &&
-              cmake -S . -B build -G Ninja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DENABLE_TESTS=ON \
-                -DBUILD_SERVER=OFF &&
-              cmake --build build -j 2 &&
-              ctest --test-dir build --output-on-failure
-            '
+          rm -rf build
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_TESTS=ON \
+            -DBUILD_SERVER=OFF
+          cmake --build build -j 2
+          ctest --test-dir build --output-on-failure
