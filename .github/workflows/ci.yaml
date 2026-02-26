@@ -5,48 +5,35 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # Fast lane: build tests only (no Seastar), run gtests on Ubuntu
-  tests:
-    runs-on: ubuntu-latest
+  build-and-test:
+    runs-on: ubuntu-24.04
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cache CMake deps (googletest, etc.)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/googletest
-            build/_deps
-          key: cmake-deps-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt') }}
-          restore-keys: cmake-deps-${{ runner.os }}-
-
-      - name: Configure (tests only)
+      - name: Build CI docker image
         run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DBUILD_SERVER=OFF \
-            -DENABLE_TESTS=ON
+          docker build -f Dockerfile.ci -t shunyakv-ci.local:latest .
 
-      - name: Build
-        run: cmake --build build -j
-
-      - name: Run tests (ctest)
-        run: ctest --test-dir build --output-on-failure
-
-  # Optional: full build including server (needs Seastar & deps preinstalled)
-  # You can enable later once you set up dependencies or containers.
-  # full-build:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Install deps (fmt etc.)  # Add Seastar if you package it
-  #       run: sudo apt-get update && sudo apt-get install -y libfmt-dev
-  #     - name: Configure
-  #       run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SERVER=ON -DENABLE_TESTS=ON
-  #     - name: Build all
-  #       run: cmake --build build -j
-  #     - name: Tests
-  #       run: ctest --test-dir build --output-on-failure
+      - name: Build + Test (inside container)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/w" -w /w \
+            shunyakv-ci.local:latest \
+            bash -lc '
+              rm -rf build &&
+              cmake -S . -B build -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DENABLE_TESTS=ON \
+                -DBUILD_SERVER=OFF &&
+              cmake --build build -j 2 &&
+              ctest --test-dir build --output-on-failure
+            '
