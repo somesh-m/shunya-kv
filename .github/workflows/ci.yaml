@@ -47,10 +47,16 @@ jobs:
       - name: Mark repo as safe for git (container)
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Debug - locate junit file
+        if: always()
+        run: |
+          ls -lah
+          ls -lah build || true
+          find . -maxdepth 3 -name "*test-results*.xml" -print
       - name: Publish Test Report
         uses: dorny/test-reporter@v1
         if: always()
         with:
           name: CTest Results
-          path: test-results.xml
+          path: "**/test-results.xml"
           reporter: java-junit
