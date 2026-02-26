@@ -1,5 +1,10 @@
 name: CI
 
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 on:
   push:
     branches: [ master ]
@@ -15,16 +20,15 @@ jobs:
   build-and-test:
     runs-on: ubuntu-24.04
 
-    permissions:
-      contents: read
-      packages: read
-
     container:
       image: ghcr.io/${{ github.repository_owner }}/shunyakv-ci:latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Mark repo as safe for git (container)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Build + Test
         run: |
@@ -35,28 +39,18 @@ jobs:
             -DBUILD_SERVER=OFF
           cmake --build build -j 2
           ctest --test-dir build --output-on-failure --output-junit test-results.xml
-      - name: Debug - List files
-        run: |
-          pwd
-          ls -R
+
       - name: Upload test results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
           path: build/test-results.xml
-      - name: Mark repo as safe for git (container)
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - name: Debug - locate junit file
-        if: always()
-        run: |
-          ls -lah
-          ls -lah build || true
-          find . -maxdepth 3 -name "*test-results*.xml" -print
+
       - name: Publish Test Report
-        uses: dorny/test-reporter@v1
         if: always()
+        uses: dorny/test-reporter@v1
         with:
           name: CTest Results
-          path: "**/test-results.xml"
+          path: "build/test-results.xml"
           reporter: java-junit
