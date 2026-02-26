@@ -44,6 +44,9 @@ jobs:
         with:
           name: test-results
           path: build/test-results.xml
+      - name: Mark repo as safe for git (container)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Publish Test Report
         uses: dorny/test-reporter@v1
         if: always()
