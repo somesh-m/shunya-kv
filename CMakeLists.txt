@@ -93,7 +93,7 @@ target_include_directories(shunya_store PRIVATE
 
 target_compile_options(shunya_store PRIVATE
   $<$<CONFIG:Debug>:-O0 -g3 -fno-omit-frame-pointer -fno-inline>
-  $<$<CONFIG:Release>:-O3 -g1>
+  $<$<CONFIG:Release>:-O3 -g0>
   $<$<CONFIG:RelWithDebInfo>:-O3 -g1 -fno-omit-frame-pointer>
   $<$<CONFIG:MinSizeRel>:-Os -g0>
   $<$<CONFIG:PerfProfile>:-O3 -g1 -fno-omit-frame-pointer>
