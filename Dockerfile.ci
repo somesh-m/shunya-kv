@@ -1,34 +1,31 @@
-# -------- Stage 1: build seastar --------
+# -------- Stage 1: build Seastar --------
 FROM ubuntu:24.04 AS seastar-build
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN set -eux; \
   apt-get update; \
-  apt-get install -y --no-install-recommends software-properties-common ca-certificates; \
-  add-apt-repository -y universe; \
-  apt-get update; \
   apt-get install -y --no-install-recommends \
-    build-essential cmake ninja-build git pkg-config clang g++ \
-    python3 python3-pip python3-venv \
-    libboost-all-dev libnuma-dev libaio-dev libssl-dev zlib1g-dev libelf-dev libpciaccess-dev \
-    curl meson \
-    dpdk dpdk-dev; \
+    git curl \
+    python3 python3-pip python3-venv; \
   rm -rf /var/lib/apt/lists/*
 
-  RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common ca-certificates && add-apt-repository -y universe && apt-get update
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common ca-certificates && add-apt-repository -y universe && apt-get update
 
 
-# venv to avoid externally-managed restrictions
+RUN set -eux; \
+  git clone --recurse-submodules --depth 1 https://github.com/scylladb/seastar.git /opt/seastar; \
+  cd /opt/seastar; \
+  ./install-dependencies.sh
+
+# Use a venv to avoid Ubuntu system Python package restrictions.
 RUN set -eux; \
   python3 -m venv /opt/py; \
   /opt/py/bin/pip install --no-cache-dir -U pip setuptools wheel
 ENV PATH="/opt/py/bin:${PATH}"
 
 RUN set -eux; \
-  git clone --recurse-submodules --depth 1 https://github.com/scylladb/seastar.git /opt/seastar; \
   cd /opt/seastar; \
-  ./install-dependencies.sh; \
-  ./configure.py --mode=release --prefix=/usr/local --enable-dpdk; \
+  ./configure.py --mode=release --prefix=/usr/local; \
   ninja -C build/release install
 
 # -------- Stage 2: final CI image --------
@@ -37,16 +34,19 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN set -eux; \
   apt-get update; \
-  apt-get install -y --no-install-recommends software-properties-common ca-certificates; \
-  add-apt-repository -y universe; \
-  apt-get update; \
   apt-get install -y --no-install-recommends \
-    build-essential cmake ninja-build git pkg-config clang g++ \
-    python3 python3-venv \
-    libboost-all-dev libnuma-dev libaio-dev libssl-dev zlib1g-dev libelf-dev libpciaccess-dev \
-    curl \
-    dpdk dpdk-dev; \
+    git curl \
+    python3 python3-pip; \
   rm -rf /var/lib/apt/lists/*
 
-# Bring in installed Seastar artifacts
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common ca-certificates && add-apt-repository -y universe && apt-get update
+# Install the distro dependency set recommended by Seastar to avoid
+# chasing transitive libraries one-by-one in CI.
+RUN set -eux; \
+  git clone --depth 1 https://github.com/scylladb/seastar.git /opt/seastar; \
+  cd /opt/seastar; \
+  ./install-dependencies.sh; \
+  rm -rf /opt/seastar
+
+# Bring in Seastar artifacts from the builder stage.
 COPY --from=seastar-build /usr/local/ /usr/local/
