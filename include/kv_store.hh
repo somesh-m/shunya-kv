@@ -1,5 +1,6 @@
 // kv_store.hh
 #pragma once
+#include "allocator/EntryProvider.hh"
 #include "kv_types.hh"
 #include "ttl/entry.hh"
 #include <absl/container/flat_hash_map.h>
@@ -24,7 +25,7 @@ class store {
     /**
      * GET <key> <value>
      */
-    future<std::optional<sstring>> get(std::string_view key) const;
+    future<std::optional<sstring>> get(std::string_view key);
 
     /**
      * SET <key> <value> EX <ttl>
@@ -32,6 +33,7 @@ class store {
     future<bool> set_with_ttl(key_t key, sstring value, uint64_t ttl);
 
   private:
-    absl::flat_hash_map<key_t, ttl::Entry> _map;
+    absl::flat_hash_map<key_t, ttl::Entry *> _map;
+    std::optional<EntryProvider> provider_;
 };
 } // namespace shunyakv

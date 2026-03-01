@@ -55,7 +55,7 @@ SEASTAR_TEST_CASE(SET_TEST_SET_VALID) {
 
 SEASTAR_TEST_CASE(SET_TEST_INVALID_ARGS) {
     const resp::ArgvView cmd{"set", "name"};
-    shunyakv::service _service = local_service();
+    shunyakv::service &_service = local_service();
     auto o = make_out();
     co_await handle_set(cmd, o.out, _service);
     co_await o.out.close();
@@ -175,8 +175,8 @@ SEASTAR_TEST_CASE(SET_TEST_TTL_REFRESH_ON_OVERWRITE) {
     BOOST_REQUIRE_EQUAL(*value, "test");
 
     auto o1 = make_out();
-    co_await handle_set(cmd_re, o.out, local_service());
-    co_await o.out.close();
+    co_await handle_set(cmd_re, o1.out, local_service());
+    co_await o1.out.close();
 
     value = (sid == this_shard_id())
                 ? co_await local_service().local_get("name")
@@ -218,8 +218,8 @@ SEASTAR_TEST_CASE(SET_TEST_TTL_SET_WITHOUT_TTL_OVERWRITE) {
     BOOST_REQUIRE_EQUAL(*value, "test");
 
     auto o1 = make_out();
-    co_await handle_set(cmd_re, o.out, local_service());
-    co_await o.out.close();
+    co_await handle_set(cmd_re, o1.out, local_service());
+    co_await o1.out.close();
 
     value = (sid == this_shard_id())
                 ? co_await local_service().local_get("name")
@@ -238,7 +238,7 @@ SEASTAR_TEST_CASE(SET_TEST_TTL_SET_WITHOUT_TTL_OVERWRITE) {
 
 SEASTAR_TEST_CASE(SET_TEST_EMPTY_VALUE) {
     const resp::ArgvView cmd{"set", "name", ""};
-    shunyakv::service _service = local_service();
+    shunyakv::service &_service = local_service();
     auto o = make_out();
     co_await handle_set(cmd, o.out, _service);
     co_await o.out.close();

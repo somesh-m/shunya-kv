@@ -1,11 +1,64 @@
 #include "ttl/ttl_cache.hh"
+#include <new>
 
 namespace ttl {
-TtlCache::TtlCache(const ttl_policy *policy) : policy_(policy) {}
+TtlCache::TtlCache(const ttl_policy *policy, uint32_t owner_id)
+    : provider_(sizeof(Entry), 64 * 1024, owner_id), policy_(policy) {}
+
+TtlCache::~TtlCache() { clear_entries(); }
+
+Entry *TtlCache::allocate_entry() {
+    MemoryId mem;
+    if (!provider_.try_fetch_entry(mem)) {
+        return nullptr;
+    }
+    if (mem.size < sizeof(Entry)) {
+        provider_.deallocate(mem.base);
+        return nullptr;
+    }
+    return new (mem.base) Entry();
+}
+
+void TtlCache::release_entry(Entry *e) noexcept {
+    if (!e) {
+        return;
+    }
+    e->~Entry();
+    provider_.deallocate(reinterpret_cast<std::byte *>(e));
+}
+
+void TtlCache::clear_entries() noexcept {
+    for (auto &[key, entry] : kv_) {
+        (void)key;
+        release_entry(entry);
+    }
+    kv_.clear();
+}
 
 void TtlCache::set(const std::string &key, std::string value, uint64_t now,
                    uint64_t ttl) {
-    Entry &e = kv_[key];
+    auto it = kv_.find(key);
+    if (it == kv_.end()) {
+        Entry *entry = allocate_entry();
+        if (!entry) {
+            return;
+        }
+        auto [inserted_it, inserted] = kv_.emplace(key, entry);
+        if (!inserted) {
+            release_entry(entry);
+            it = inserted_it;
+        } else {
+            it = inserted_it;
+        }
+    } else if (it->second == nullptr) {
+        Entry *entry = allocate_entry();
+        if (!entry) {
+            return;
+        }
+        it->second = entry;
+    }
+
+    Entry &e = *(it->second);
     e.value = std::move(value);
     e.expires_at = now + ttl;
     e.ver++;
@@ -19,10 +72,16 @@ std::optional<std::string> TtlCache::get(const std::string &key, uint64_t now) {
     if (it == kv_.end())
         return std::nullopt;
 
-    Entry &e = it->second;
+    Entry *ep = it->second;
+    if (!ep) {
+        kv_.erase(it);
+        return std::nullopt;
+    }
+    Entry &e = *ep;
 
     // If expired, erase immediately (fast cleanup on read)
     if (is_expired(now, e.expires_at)) {
+        release_entry(ep);
         kv_.erase(it);
         return std::nullopt;
     }
@@ -64,7 +123,12 @@ std::size_t TtlCache::evict(uint64_t now, std::size_t budget) {
         if (it == kv_.end())
             continue;
 
-        Entry &e = it->second;
+        Entry *ep = it->second;
+        if (!ep) {
+            kv_.erase(it);
+            continue;
+        }
+        Entry &e = *ep;
 
         // Lazy invalidation checks
         if (e.ver != top.ver)
@@ -72,10 +136,20 @@ std::size_t TtlCache::evict(uint64_t now, std::size_t budget) {
         if (e.expires_at != top.expires_at)
             continue;
 
+        release_entry(ep);
         kv_.erase(it);
         removed++;
     }
     return removed;
 }
-bool TtlCache::del(const std::string &key) { return kv_.erase(key) > 0; }
+
+bool TtlCache::del(const std::string &key) {
+    auto it = kv_.find(key);
+    if (it == kv_.end()) {
+        return false;
+    }
+    release_entry(it->second);
+    kv_.erase(it);
+    return true;
+}
 } // namespace ttl

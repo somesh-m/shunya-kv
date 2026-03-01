@@ -1,9 +1,11 @@
 #pragma once
 
+#include "allocator/EntryProvider.hh"
 #include "ttl/entry.hh"
 #include "ttl/heap_node.hh"
 #include "ttl/ttl_policy.hh"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <queue>
@@ -13,7 +15,8 @@
 namespace ttl {
 class TtlCache {
   public:
-    explicit TtlCache(const ttl_policy *policy = nullptr);
+    explicit TtlCache(const ttl_policy *policy = nullptr, uint32_t owner_id = 0);
+    ~TtlCache();
 
     void set(const std::string &key, std::string value, uint64_t now,
              uint64_t ttl);
@@ -34,9 +37,14 @@ class TtlCache {
     static bool is_expired(uint64_t now, uint64_t expires_at) {
         return now >= expires_at;
     }
-    
-    std::unordered_map<std::string, Entry> kv_;
+
+    Entry *allocate_entry();
+    void release_entry(Entry *e) noexcept;
+    void clear_entries() noexcept;
+
+    std::unordered_map<std::string, Entry *> kv_;
     std::priority_queue<HeapNode, std::vector<HeapNode>, MinExpiry> pq_;
+    EntryProvider provider_;
 
     const ttl_policy *policy_ = nullptr;
 

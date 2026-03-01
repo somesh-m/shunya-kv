@@ -22,7 +22,7 @@ class service {
     future<> stop();
     future<bool> local_set(std::string_view, sstring);
     future<bool> local_set(std::string_view, sstring, uint64_t);
-    future<std::optional<sstring>> local_get(std::string_view) const;
+    future<std::optional<sstring>> local_get(std::string_view);
     void record_get(bool) noexcept;
     void record_set(bool) noexcept;
     void record_get_latency(uint64_t) noexcept;
