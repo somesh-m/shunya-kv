@@ -138,7 +138,12 @@ SET(TEST_SOURCES
   ${SHUNYA_TEST_DIR}/test_hash_wrapper.cc
   ${SHUNYA_TEST_DIR}/ttl_cache_test.cc
 )
-add_executable(shunya_test ${TEST_SOURCES} ${SHUNYA_SRC_DIR}/ttl/ttl_cache.cc)
+add_executable(shunya_test
+  ${TEST_SOURCES}
+  ${SHUNYA_SRC_DIR}/ttl/ttl_cache.cc
+  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
+)
 # Make sure tests can include your headers + vendored fnv
 target_include_directories(shunya_test PRIVATE
   ${SHUNYA_INCLUDE_DIR}        # e.g. include/hash_wrapper.hh
@@ -148,6 +153,7 @@ target_include_directories(shunya_test PRIVATE
 # Link gtest and your fnv_ref (and anything else your test needs)
 target_link_libraries(shunya_test PRIVATE
   GTest::gtest GTest::gtest_main
+  Seastar::seastar
   fnv_ref
   # fmt::fmt         # if your test uses fmt
   # Seastar::seastar # only if your test touches seastar

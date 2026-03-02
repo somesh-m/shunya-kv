@@ -3,7 +3,9 @@
 using namespace seastar;
 namespace shunyakv {
 
-future<> service::start() { return _store.start(this_shard_id()); }
+future<> service::start(const eviction::EvictionConfig &ev_cfg) {
+    return _store.start(this_shard_id(), ev_cfg);
+}
 
 future<> service::stop() { return _store.stop(); }
 
@@ -18,7 +20,7 @@ future<bool> service::local_set(std::string_view key, sstring value,
     return _store.set_with_ttl(std::move(k), std::move(value), ttl);
 }
 
-future<std::optional<sstring>> service::local_get(std::string_view key) const {
+future<std::optional<sstring>> service::local_get(std::string_view key) {
     return _store.get(key);
 }
 

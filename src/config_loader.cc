@@ -30,6 +30,24 @@ static inline bool parse_bool(std::string_view v, bool &out) {
     return false;
 }
 
+static inline std::string_view maybe_unquote(std::string_view v) {
+    if (v.size() >= 2 && v.front() == '"' && v.back() == '"') {
+        return v.substr(1, v.size() - 2);
+    }
+    return v;
+}
+
+static inline bool parse_u64(std::string_view v, uint64_t &out) {
+    uint64_t parsed = 0;
+    const auto [ptr, ec] =
+        std::from_chars(v.data(), v.data() + v.size(), parsed);
+    if (ec == std::errc{} && ptr == v.data() + v.size()) {
+        out = parsed;
+        return true;
+    }
+    return false;
+}
+
 void load_config_file(db_config &cfg, const char *path) {
     namespace fs = std::filesystem;
 
@@ -81,6 +99,7 @@ void load_config_file(db_config &cfg, const char *path) {
         if (value.empty()) {
             continue;
         }
+        value = maybe_unquote(value);
 
         if (key == "db_port" || key == "base_port" || key == "port") {
             unsigned parsed = 0;
@@ -92,6 +111,23 @@ void load_config_file(db_config &cfg, const char *path) {
             }
         } else if (key == "hash") {
             cfg.hash = seastar::sstring(value.data(), value.size());
+        } else if (key == "policy") {
+            cfg.policy = seastar::sstring(value.data(), value.size());
+        } else if (key == "eviction_trigger_cutoff") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.eviction_trigger_cutoff = static_cast<std::size_t>(parsed);
+            }
+        } else if (key == "eviction_stop_cutoff") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.eviction_stop_cutoff = static_cast<std::size_t>(parsed);
+            }
+        } else if (key == "eviction_budget") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.eviction_budget = static_cast<std::size_t>(parsed);
+            }
         } else if (key == "send_shard_details_on_connect") {
             bool parsed = false;
             if (parse_bool(value, parsed)) {
