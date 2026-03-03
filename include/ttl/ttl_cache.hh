@@ -20,7 +20,7 @@ class TtlCache {
     TtlCache() {}
 
     // Evict expired entries. 'budget' prevents long stalls
-    seastar::future<std::vector<ttl::Entry &>>
+    seastar::future<std::vector<ttl::Entry *>>
     evict(uint64_t now, std::size_t budget = 10000);
 
     std::size_t size() const { return kv_.size(); }

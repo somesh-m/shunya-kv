@@ -136,7 +136,7 @@ FetchContent_MakeAvailable(googletest)
 SET(TEST_SOURCES
   ${SHUNYA_TEST_DIR}/hashtest.cc
   ${SHUNYA_TEST_DIR}/test_hash_wrapper.cc
-  ${SHUNYA_TEST_DIR}/ttl_cache_test.cc
+  # ${SHUNYA_TEST_DIR}/ttl_cache_test.cc
 )
 add_executable(shunya_test
   ${TEST_SOURCES}

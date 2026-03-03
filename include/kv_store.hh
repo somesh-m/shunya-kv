@@ -4,6 +4,7 @@
 #include "kv_types.hh"
 #include "pool/object_pool.hh"
 #include "ttl/entry.hh"
+#include "ttl/heap_node.hh"
 #include "ttl/ttl_cache.hh"
 #include <absl/container/flat_hash_map.h>
 #include <optional>
@@ -15,6 +16,7 @@
 using namespace seastar;
 namespace shunyakv {
 class store {
+
   public:
     future<> start(unsigned shard_id);
     future<> stop();
@@ -26,8 +28,9 @@ class store {
 
     /**
      * GET <key> <value>
+     * Don't make get const as it has to perform lazy deletion of expired keys
      */
-    future<std::optional<sstring>> get(std::string_view key) const;
+    future<std::optional<sstring>> get(std::string_view key);
 
     /**
      * SET <key> <value> EX <ttl>
@@ -39,8 +42,9 @@ class store {
 
     /**
      * Use absl map to store key value pairs
+     * EntryDeleter is used to return the GCd slots to the pool
      */
-    absl::flat_hash_map<key_t, ttl::Entry> _map;
+    absl::flat_hash_map < key_t, std::unique_ptr<ttl::Entry> _map;
     /**
      * Instance of object pool to allocate and release memory
      */
@@ -53,5 +57,11 @@ class store {
      * Instance of ttl policy
      */
     ttl::TtlCache ttl_policy_;
+    /**
+     * Instance of a priority queue to maintain ttls
+     */
+    std::priority_queue<ttl::HeapNode, std::vector<ttl::HeapNode>,
+                        ttl::MinExpiry>
+        pq_;
 };
 } // namespace shunyakv

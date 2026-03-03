@@ -10,6 +10,19 @@ namespace ttl {
 struct Entry {
     std::string value;
 
+    /**
+     * We store the key inside the entry to avoid scanning the entire map
+     * during eviction to locate the associated key.
+     *
+     * This introduces additional memory overhead per entry, but prevents
+     * an O(N) map scan per eviction, which would be extremely expensive
+     * when handling large keyspaces and batch evictions.
+     *
+     * The tradeoff favors predictable eviction performance over minimal memory
+     * usage.
+     */
+    seastar::sstring key;
+
     // Absolute expiration time
     uint64_t expires_at = 0;
 

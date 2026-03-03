@@ -32,8 +32,8 @@ void SievePolicy::on_erase(ttl::Entry &e) {
     }
 }
 
-seastar::future<std::vector<ttl::Entry *>> SievePolicy::evict() {
-    std::vector<ttl::Entry &> victim_list;
+seastar::future<std::vector<seastar::sstring>> SievePolicy::evict() {
+    std::vector<seastar::sstring> victim_list;
     if (sieveList_.empty()) {
         co_return victim_list;
     }
@@ -61,9 +61,9 @@ seastar::future<std::vector<ttl::Entry *>> SievePolicy::evict() {
             hand_ = sieveList_.begin();
         }
 
-        ttl::Entry &victim = *victim_it;
-        victim_list.push_back(victim);
+        // Save pointer before erase
         sieveList_.erase(victim_it);
+        victim_list.push_back(victim_it->key);
 
         ++evicted_count;
         if (evicted_count % 100 == 0) {
@@ -73,6 +73,8 @@ seastar::future<std::vector<ttl::Entry *>> SievePolicy::evict() {
 
     if (sieveList_.empty()) {
         hand_ = sieveList_.end();
+    } else if (hand_ == sieveList_.end()) {
+        hand_ = sieveList_.begin();
     }
 
     co_return victim_list;

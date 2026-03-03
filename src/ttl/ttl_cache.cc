@@ -2,13 +2,14 @@
 
 namespace ttl {
 
-seastar::future<std::vector<ttl::Entry &>> TtlCache::evict(uint64_t now,
-                                                           std::size_t budget) {
-    std::vector<ttl::Entry &> victim_list;
+seastar::future<std::vector<seastar::sstring>>
+TtlCache::evict(uint64_t now, std::size_t budget) {
+    std::vector<seastar::sstring> victim_list;
     std::size_t removed = 0;
 
     while (budget-- > 0 && !pq_.empty()) {
-        const HeapNode top = pq_.top();
+        const HeapNode
+        top = pq_.top();
         if (!is_expired(now, top.expires_at))
             break;
 
@@ -26,10 +27,8 @@ seastar::future<std::vector<ttl::Entry &>> TtlCache::evict(uint64_t now,
         if (e.expires_at != top.expires_at)
             continue;
 
-        auto entry = std::move(it->second);
-        victim_list.push_back(*entry);
-        // kv_.erase(it);
-        // pool_.release(std::move(entry));
+        victim_list.push_back(top.key);
+
         removed++;
         if (removed % 100 == 0) {
             co_await seastar::coroutine::maybe_yield();
