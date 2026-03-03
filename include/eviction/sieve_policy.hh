@@ -22,7 +22,7 @@ class SievePolicy {
     void on_erase(ttl::Entry &e);
     void on_hit(ttl::Entry &e);
 
-    seastar::future<std::vector<ttl::Entry *>> evict();
+    seastar::future<std::vector<seastar::sstring>> evict();
 
     std::size_t size() const noexcept;
     bool empty() const noexcept;

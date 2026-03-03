@@ -140,7 +140,7 @@ SET(TEST_SOURCES
 )
 add_executable(shunya_test
   ${TEST_SOURCES}
-  ${SHUNYA_SRC_DIR}/ttl/ttl_cache.cc
+  # ${SHUNYA_SRC_DIR}/ttl/ttl_cache.cc
   ${SHUNYA_SRC_DIR}/pool/object_pool.cc
   ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
 )

@@ -53,7 +53,7 @@ seastar::future<> store::start(unsigned) {
      */
     _map.reserve(27000'00);
 
-    entry_pool_ = CacheEntryPool(0);
+    co_await clentry_pool_.init();
     if (!sieve_policy_.has_value()) {
         eviction::EvictionConfig ev_cfg{
             .policy = eviction::PolicyKind::Sieve,
@@ -64,7 +64,6 @@ seastar::future<> store::start(unsigned) {
         sieve_policy_.emplace(ev_cfg);
     }
 
-    ttl_policy_ = ttl::TtlCache{};
     co_return;
 }
 
@@ -75,21 +74,38 @@ seastar::future<> store::stop() {
     co_return;
 }
 
-seastar::future<bool> store::set(key_t key, seastar::sstring value) {
+seastar::future<bool> store::set(std::string_view key_view,
+                                 seastar::sstring value) {
     auto pooled_entry = co_await entry_pool_.acquire();
     if (!pooled_entry) {
         co_return false;
     }
-
+    pooled_entry->key = seastar::sstring(key_view);
     pooled_entry->value = std::move(value);
     pooled_entry->expires_at = 0;
 
-    _map[std::move(key)] = std::move(pooled_entry);
+    auto [it, inserted] =
+        _map.try_emplace(seastar::sstring(key_view), std::move(pooled_entry));
+    if (!inserted) {
+        /**
+         * try_emplace inserts only when the key is absent, avoiding a
+         * separate find+insert sequence.
+         *
+         * For updates (key already present), we replace the existing entry
+         * and return the old one to the entry pool instead of letting it be
+         * destroyed, preserving pooling semantics and avoiding allocator
+         * churn.
+         */
+        entry_pool_.release(std::exchange(it->second, std::move(pooled_entry)));
+    }
     sieve_policy_->on_insert(*pooled_entry);
     co_await check_memory_and_evict();
     co_return true;
 }
 
+/**
+ * TODO: Merge set_with_ttl and set into one function to avoid code redudency
+ */
 seastar::future<bool> store::set_with_ttl(std::string_view key_view,
                                           seastar::sstring value,
                                           uint64_t ttl) {
@@ -109,9 +125,9 @@ seastar::future<bool> store::set_with_ttl(std::string_view key_view,
 
     // Moving the original key and original entry to _map no copy
     auto &entry_ref = *pooled_entry;
-    pq_.push(HeapNode{.key = std::string_view(entry_ref.key),
-                      .expires_at = entry_ref.expires_at,
-                      .ver = entry_ref.ver});
+    pq_.push(ttl::HeapNode{.key = std::string_view(entry_ref.key),
+                           .expires_at = entry_ref.expires_at,
+                           .ver = entry_ref.ver});
 
     auto [it, inserted] =
         _map.try_emplace(seastar::sstring(key_view), std::move(pooled_entry));
@@ -126,29 +142,28 @@ seastar::future<bool> store::set_with_ttl(std::string_view key_view,
          */
         entry_pool_.release(std::exchange(it->second, std::move(pooled_entry)));
     }
+    sieve_policy_->on_insert(*pooled_entry);
     co_await check_memory_and_evict();
-
     co_return true;
 }
 
 seastar::future<std::optional<seastar::sstring>>
 store::get(std::string_view key) {
-    auto it = _map.find(key_t{key.data(), key.size()});
+    auto it = _map.find(seastar::sstring(key));
     if (it == _map.end()) {
         co_return std::nullopt;
     }
-    const ttl::Entry &e = *(it->second);
-    if (e.expires_at != 0 && now_s() >= e.expires_at) {
-        sieve_policy_->on_erase(*(it->second));
+    auto &entry_ptr = it->second;
+    if (entry_ptr->expires_at != 0 && now_s() >= entry_ptr->expires_at) {
+        sieve_policy_->on_erase(*entry_ptr);
 
         auto node = _map.extract(it);
-
         // node.mapped() is the unique_ptr! Pass it to the pool.
         entry_pool_.release(std::move(node.mapped()));
         co_return std::nullopt;
     }
-    sieve_policy_->on_hit(*(it->second));
-    co_return std::optional<seastar::sstring>(e.value);
+    sieve_policy_->on_hit(*entry_ptr);
+    co_return std::optional<seastar::sstring>(entry_ptr->value);
 }
 
 seastar::future<> store::check_memory_and_evict() {
@@ -167,46 +182,62 @@ seastar::future<> store::check_memory_and_evict() {
     if (usage_fraction > 0.8) {
         kv_store_log.info("Memory pressure high {}, evicting keys.",
                           usage_fraction);
-        if (!sieve_policy_.has_value()) {
+        // Always do ttl eviction before any other eviction
+        co_await evict_ttl_keys(now_s(), 300);
+        if (!sieve_policy_.has_value())
             co_return;
-        }
-
         const auto sieve_victims = co_await sieve_policy_->evict();
-        const auto ttl_victims = co_await ttl_policy_.evict(now_s(), 200);
-
-        auto process_victims =
-            [&](std::vector<seastar::sstring> &victims) -> seastar::future<> {
+        for (const auto &key : sieve_victims) {
             uint32_t count = 0;
-            for (auto &key : victims) {
-                auto node = _map.extract(key);
-                if (node) {
-                    // TODO: check if the entry is also in the other list
-                }
-            }
-        } uint_32_t evicted_count = 0;
-        for (const auto &victim_key : ttl_victims) {
-            auto node = _map.extract(victim_key);
-            if (node) {
+            auto node = _map.extract(key);
+            if (!node.empty()) {
                 entry_pool_.release(std::move(node.mapped()));
             }
-            if (evicted_count % 100 == 0) {
+            count++;
+            if (count % 100 == 0) {
                 co_await seastar::coroutine::maybe_yield();
             }
-            evicted_count++;
-        }
-        evicted_count = 0;
-        for (const auto &victim_key : sieve_victims) {
-            auto node = _map.extract(victim_key);
-            if (node) {
-                entry_pool_.release(std::move(node.mapped()));
-            }
-            if (evicted_count % 100 == 0) {
-                co_await seastar::coroutine::maybe_yield();
-            }
-            evicted_count++;
         }
     }
     co_return;
 }
 
+/**
+ * TTL eviction is an integral part of the key store, not a pluggable logic, so
+ * we don't need to move it into a separate class
+ */
+future<> store::evict_ttl_keys(uint64_t now, std::size_t budget) {
+    std::size_t removed = 0;
+
+    while (budget > 0 && !pq_.empty()) {
+        const ttl::HeapNode top = pq_.top();
+        if (!is_expired(now, top.expires_at))
+            break;
+
+        pq_.pop();
+        budget--; // Decrement budget for each attempted eviction
+
+        auto mEnt = _map.extract(seastar::sstring(top.key));
+
+        if (!mEnt.empty()) {
+            // Check if the entry in the map is actually the one the PQ refers
+            // to
+            if (mEnt.mapped()->ver == top.ver) {
+                // 1. Unlink from Sieve
+                sieve_policy_->on_erase(*mEnt.mapped());
+                // 2. Recycle to Pool
+                entry_pool_.release(std::move(mEnt.mapped()));
+            } else {
+                // Version mismatch: the key was updated/replaced.
+                // Re-insert the "New" entry back into the map.
+                _map.insert(std::move(mEnt));
+            }
+        }
+
+        if (++removed % 100 == 0) {
+            co_await seastar::coroutine::maybe_yield();
+        }
+    }
+    co_return;
+}
 } // namespace shunyakv

@@ -5,11 +5,12 @@
 #include "pool/object_pool.hh"
 #include "ttl/entry.hh"
 #include "ttl/heap_node.hh"
-#include "ttl/ttl_cache.hh"
 #include <absl/container/flat_hash_map.h>
 #include <optional>
+#include <queue>
 #include <seastar/core/future.hh>
 #include <string_view>
+
 /**
  * Each shard is supposed to have it's own copy of store
  */
@@ -24,18 +25,27 @@ class store {
     /**
      * SET <key> <value>
      */
-    future<bool> set(key_t key, sstring value);
+    future<bool> set(std::string_view key, sstring value);
 
     /**
      * GET <key> <value>
      * Don't make get const as it has to perform lazy deletion of expired keys
      */
-    future<std::optional<sstring>> get(std::string_view key);
+    future<std::optional<seastar::sstring>> get(std::string_view key);
 
     /**
      * SET <key> <value> EX <ttl>
      */
-    future<bool> set_with_ttl(key_t key, sstring value, uint64_t ttl);
+    future<bool> set_with_ttl(std::string_view key, sstring value,
+                              uint64_t ttl);
+
+    /**
+     * Perform TTL eviction
+     */
+    future<> evict_ttl_keys(uint64_t now, std::size_t budget);
+    inline bool is_expired(uint64_t now, uint64_t expires_at) {
+        return now >= expires_at;
+    }
 
   private:
     future<> check_memory_and_evict();
@@ -44,7 +54,7 @@ class store {
      * Use absl map to store key value pairs
      * EntryDeleter is used to return the GCd slots to the pool
      */
-    absl::flat_hash_map < key_t, std::unique_ptr<ttl::Entry> _map;
+    absl::flat_hash_map<key_t, std::unique_ptr<ttl::Entry>> _map;
     /**
      * Instance of object pool to allocate and release memory
      */
@@ -53,10 +63,6 @@ class store {
      * Instance of sieve eviction policy
      */
     std::optional<SievePolicy> sieve_policy_;
-    /**
-     * Instance of ttl policy
-     */
-    ttl::TtlCache ttl_policy_;
     /**
      * Instance of a priority queue to maintain ttls
      */

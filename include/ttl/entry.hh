@@ -2,6 +2,7 @@
 
 #include <boost/intrusive/list_hook.hpp>
 #include <cstdint>
+#include <seastar/core/sstring.hh>
 #include <string>
 
 namespace bi = boost::intrusive;

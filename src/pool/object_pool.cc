@@ -1,9 +1,14 @@
 #include "pool/object_pool.hh"
+#include <seastar/core/coroutine.hh>
 
-void CacheEntryPool::prepopulate_pool() {
+seastar::future<> CacheEntryPool::prepopulate_pool() {
     for (std::size_t i = 0; i < max_size_; i++) {
         pool_.push_back(std::make_unique<ttl::Entry>());
+        if (i % 100 == 0) {
+            co_await seastar::coroutine::maybe_yield();
+        }
     }
+    co_return;
 }
 
 std::size_t CacheEntryPool::get_available_slots() { return pool_.size(); }

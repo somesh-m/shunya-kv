@@ -18,7 +18,7 @@ future<bool> service::local_set(std::string_view key, sstring value,
     return _store.set_with_ttl(std::move(k), std::move(value), ttl);
 }
 
-future<std::optional<sstring>> service::local_get(std::string_view key) const {
+future<std::optional<sstring>> service::local_get(std::string_view key) {
     return _store.get(key);
 }
 

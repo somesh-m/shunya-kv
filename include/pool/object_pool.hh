@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <memory>
 #include <seastar/core/circular_buffer.hh>
+#include <seastar/core/coroutine.hh>
 #include <seastar/core/memory.hh>
 #include <seastar/core/shard_id.hh>
 #include <seastar/util/log.hh>
@@ -16,14 +17,16 @@ inline seastar::logger &pool_logger() {
 class CacheEntryPool {
   public:
     explicit CacheEntryPool(std::size_t max_size)
-        : max_size_(max_size == 0 ? calculate_optimal_pool_size() : max_size) {
-        prepopulate_pool();
+        : max_size_(max_size == 0 ? calculate_optimal_pool_size() : max_size) {}
+
+    seastar::future<> init() { // call this after construction
+        co_await prepopulate_pool();
     }
 
     seastar::future<std::unique_ptr<ttl::Entry>> acquire();
     void release(std::unique_ptr<ttl::Entry> entry);
 
-    void prepopulate_pool();
+    seastar::future<> prepopulate_pool();
 
     std::size_t calculate_optimal_pool_size() noexcept;
     std::size_t get_available_slots();

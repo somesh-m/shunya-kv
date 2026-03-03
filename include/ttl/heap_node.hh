@@ -5,8 +5,8 @@
 
 namespace ttl {
 struct HeapNode {
-    uint64_t expires_at = 0;
     std::string_view key;
+    uint64_t expires_at = 0;
     uint32_t ver = 0;
 };
 
