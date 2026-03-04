@@ -1,5 +1,28 @@
-BasedOnStyle: Google
+# .clang-format
+BasedOnStyle: LLVM
+Language: Cpp
+
 IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
 ColumnLimit: 100
-AlignConsecutiveAssignments: true
-AlignConsecutiveDeclarations: true
+
+# Keeps comment blocks nice
+ReflowComments: true
+
+# Prefer consistent pointer/reference style
+PointerAlignment: Left
+DerivePointerAlignment: false
+
+# Helps keep short things on one line where appropriate
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+# Includes
+SortIncludes: true
+IncludeBlocks: Preserve
+
+# Braces
+BreakBeforeBraces: Allman

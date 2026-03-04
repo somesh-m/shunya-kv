@@ -2,8 +2,9 @@
 
 set -e
 
-# Default build type
+# Default build type and lint toggle
 BUILD_TYPE=${1:-Release}
+RUN_LINT=${2:-}
 
 # Validate build type
 case "$BUILD_TYPE" in
@@ -32,6 +33,11 @@ cd build
 
 echo "Running CMake..."
 cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE ..
+
+if [[ "$RUN_LINT" == "lint" ]]; then
+    echo "Running clang-format and clang-tidy checks..."
+    cmake --build . --target format-check tidy -j$(nproc)
+fi
 
 echo "Building..."
 make -j$(nproc)
