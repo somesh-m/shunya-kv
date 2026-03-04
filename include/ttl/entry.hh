@@ -5,6 +5,8 @@
 #include <seastar/core/sstring.hh>
 #include <string>
 
+class CacheEntryPool;
+
 namespace bi = boost::intrusive;
 
 namespace ttl {
@@ -36,8 +38,6 @@ struct Entry {
     // Last access time (for idle reset)
     uint64_t last_access = 0;
 
-    bool in_use = false;
-
     bool visited = false; // used for sieve eviction
 
     // This adds the next/prev pointers directly inside the object
@@ -51,5 +51,14 @@ struct Entry {
             this->ver += 1;
         }
     }
+
+    // public getter for in_use
+  public:
+    bool is_in_use() const noexcept { return in_use_; }
+
+  private:
+    bool in_use_ = false;
+
+    friend class ::CacheEntryPool;
 };
 } // namespace ttl

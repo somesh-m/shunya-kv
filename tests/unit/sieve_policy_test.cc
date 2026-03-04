@@ -35,9 +35,14 @@ void createEntry(uint32_t entry_count, SievePolicy &policy) {
     for (uint32_t i = 1; i <= entry_count; i++) {
         std::string str_offset = std::to_string(i);
         seastar::sstring key = "test_key_" + str_offset;
-        auto [it, inserted] =
-            map_.emplace(key, ttl::Entry{"test_value_" + str_offset, key, 0, 0,
-                                         0, 0, true, false});
+        auto [it, inserted] = map_.emplace(key, ttl::Entry{});
+        it->second.value = "test_value_" + str_offset;
+        it->second.key = key;
+        it->second.expires_at = 0;
+        it->second.ver = 0;
+        it->second.heat = 0;
+        it->second.last_access = 0;
+        it->second.visited = false;
         policy.on_insert(it->second);
     }
 }

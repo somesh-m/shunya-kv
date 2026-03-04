@@ -17,13 +17,13 @@ std::size_t CacheEntryPool::get_total_slots() { return max_size_; }
 seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
     if (pool_.empty()) {
         auto entry = std::make_unique<ttl::Entry>();
-        entry->in_use = true;
+        entry->in_use_ = true;
         co_return entry;
     }
 
     auto entry = std::move(pool_.front());
     pool_.pop_front();
-    entry->in_use = true;
+    entry->in_use_ = true;
     co_return entry;
 }
 
@@ -32,8 +32,10 @@ void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
         return;
     }
 
-    entry->in_use = false;
+    entry->in_use_ = false;
+    entry->visited = false;
     entry->value.clear();
+    entry->key = "";
     entry->expires_at = 0;
     entry->ver = 0;
     entry->heat = 0;
@@ -44,13 +46,23 @@ void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
     }
 }
 
-std::size_t CacheEntryPool::calculate_optimal_pool_size() noexcept {
+std::size_t CacheEntryPool::get_per_entry_size_estimate() {
+    return sizeof(ttl::Entry) + value_offset_;
+}
+
+std::size_t CacheEntryPool::get_usable_memory() {
     const std::size_t total_memory = seastar::memory::stats().total_memory();
-    const std::size_t target_memory = total_memory * 0.8;
-    const std::size_t estimated_entry_size = sizeof(ttl::Entry) + 4096;
+    const std::size_t target_memory =
+        total_memory * allowed_percentage_total_mem_;
+    return target_memory;
+}
+
+std::size_t CacheEntryPool::calculate_optimal_pool_size() noexcept {
+    const std::size_t target_memory = get_usable_memory();
+    const std::size_t estimated_entry_size = get_per_entry_size_estimate();
     const std::size_t pool_size = target_memory / estimated_entry_size;
-    pool_logger().info("Shard Id: {} Assigned Memory: {} GB Pool Count: {}",
+    pool_logger().info("Shard Id: {} Usable Memory: {} GB Pool Count: {}",
                        seastar::this_shard_id(),
-                       total_memory / (1024 * 1024 * 1024), pool_size);
+                       target_memory / (1024 * 1024 * 1024), pool_size);
     return pool_size;
 }

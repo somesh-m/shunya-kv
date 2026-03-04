@@ -204,3 +204,61 @@ add_test(NAME SIEVE_POLICY_NO_EVICTION
 add_test(NAME SIEVE_POLICY_HAND_WRAP_AROUND
   COMMAND sieve_policy_unit_test --run_test=sieve_policy_hand_wrap_around
 )
+
+add_executable(object_pool_unit_test
+  object_pool_test.cc
+  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+)
+
+target_include_directories(object_pool_unit_test PRIVATE
+  ${SHUNYA_INCLUDE_DIR}
+  ${SHUNYA_SRC_DIR}
+  ${CMAKE_SOURCE_DIR}/third_party/fnv
+)
+
+target_link_libraries(object_pool_unit_test PRIVATE
+  Seastar::seastar_testing
+  fmt::fmt
+  absl::flat_hash_map
+  fnv_ref
+)
+
+target_compile_definitions(object_pool_unit_test PRIVATE
+  SEASTAR_TESTING_MAIN
+)
+
+add_test(NAME OBJECT_POOL_CREATE_BY_MEMORY
+  COMMAND object_pool_unit_test --run_test=object_pool_create_by_memory
+)
+
+add_test(NAME OBJECT_POOL_CREATE_FIXED_SIZE
+  COMMAND object_pool_unit_test --run_test=object_pool_fixed_size
+)
+
+add_test(NAME OBJECT_POOL_CREATE_OVERFLOW
+  COMMAND object_pool_unit_test --run_test=object_pool_create_overflow
+)
+
+add_test(NAME OBJECT_POOL_ACQUIRE_RELEASE
+  COMMAND object_pool_unit_test --run_test=object_pool_acquire_release
+)
+
+add_test(NAME OBJECT_POOL_MULTIPLE_INIT
+  COMMAND object_pool_unit_test --run_test=object_pool_multiple_init
+)
+
+add_test(NAME OBJECT_POOL_ACQUIRE_OVERFLOW
+  COMMAND object_pool_unit_test --run_test=object_pool_acquire_overflow
+)
+
+add_test(NAME OBJECT_POOL_RELEASE_OVERFLOW
+  COMMAND object_pool_unit_test --run_test=object_pool_release_overflow
+)
+
+add_test(NAME OBJECT_POOL_MUTATE_FIELDS
+  COMMAND object_pool_unit_test --run_test=object_pool_mutate_fields
+)
+
+add_test(NAME OBJECT_POOL_DISTINCT_POINTER
+  COMMAND object_pool_unit_test --run_test=object_pool_distinct_pointer
+)
