@@ -20,13 +20,15 @@ class CacheEntryPool {
         : max_size_(max_size == 0 ? calculate_optimal_pool_size() : max_size) {}
 
     seastar::future<> init() { // call this after construction
+        if (initialized_) {
+            co_return;
+        }
+        initialized_ = true;
         co_await prepopulate_pool();
     }
 
     seastar::future<std::unique_ptr<ttl::Entry>> acquire();
     void release(std::unique_ptr<ttl::Entry> entry);
-
-    seastar::future<> prepopulate_pool();
 
     std::size_t calculate_optimal_pool_size() noexcept;
     std::size_t get_available_slots();
@@ -35,5 +37,7 @@ class CacheEntryPool {
   private:
     seastar::circular_buffer<std::unique_ptr<ttl::Entry>> pool_;
     std::size_t max_size_;
+    bool initialized_ = false;
     std::shared_ptr<SievePolicy> policy_;
+    seastar::future<> prepopulate_pool();
 };
