@@ -53,7 +53,7 @@ seastar::future<> store::start(unsigned) {
      */
     _map.reserve(27000'00);
 
-    co_await clentry_pool_.init();
+    co_await entry_pool_.init();
     if (!sieve_policy_.has_value()) {
         eviction::EvictionConfig ev_cfg{
             .policy = eviction::PolicyKind::Sieve,
@@ -82,23 +82,23 @@ seastar::future<bool> store::set(std::string_view key_view,
     }
     pooled_entry->key = seastar::sstring(key_view);
     pooled_entry->value = std::move(value);
-    pooled_entry->expires_at = 0;
 
     auto [it, inserted] =
         _map.try_emplace(seastar::sstring(key_view), std::move(pooled_entry));
     if (!inserted) {
         /**
-         * try_emplace inserts only when the key is absent, avoiding a
-         * separate find+insert sequence.
-         *
-         * For updates (key already present), we replace the existing entry
-         * and return the old one to the entry pool instead of letting it be
-         * destroyed, preserving pooling semantics and avoiding allocator
-         * churn.
+         * The key already exists. 'it->second' is the unique_ptr to the OLD
+         * entry. 'pooled_entry' is the unique_ptr to our NEW entry.
          */
-        entry_pool_.release(std::exchange(it->second, std::move(pooled_entry)));
+
+        // 1. Inherit the metadata from the old entry
+        // We keep the version, heat, and access times so the
+        // eviction policies (Sieve/PQ) stay consistent.
+        it->second->update_from(std::move(*pooled_entry), false);
+
+        entry_pool_.release(std::move(pooled_entry));
     }
-    sieve_policy_->on_insert(*pooled_entry);
+    sieve_policy_->on_insert(*it->second.get());
     co_await check_memory_and_evict();
     co_return true;
 }
@@ -123,12 +123,8 @@ seastar::future<bool> store::set_with_ttl(std::string_view key_view,
     pooled_entry->value = std::move(value);
     pooled_entry->expires_at = now_s() + ttl;
 
-    // Moving the original key and original entry to _map no copy
-    auto &entry_ref = *pooled_entry;
-    pq_.push(ttl::HeapNode{.key = std::string_view(entry_ref.key),
-                           .expires_at = entry_ref.expires_at,
-                           .ver = entry_ref.ver});
-
+    // TODO:Ensure the std::move doesn't happen in case if the key is already
+    // present
     auto [it, inserted] =
         _map.try_emplace(seastar::sstring(key_view), std::move(pooled_entry));
     if (!inserted) {
@@ -140,9 +136,17 @@ seastar::future<bool> store::set_with_ttl(std::string_view key_view,
          * return the old one to the entry pool instead of letting it be
          * destroyed, preserving pooling semantics and avoiding allocator churn.
          */
-        entry_pool_.release(std::exchange(it->second, std::move(pooled_entry)));
+        it->second->update_from(std::move(*pooled_entry), true);
+        entry_pool_.release(std::move(pooled_entry));
     }
-    sieve_policy_->on_insert(*pooled_entry);
+
+    // In case of update call, we need to add an entry with ver bumped up. This
+    // will ensure that the older pq_ entry is invalidated. Otherwise, older
+    // expires_at will be considered to expire the key.
+    pq_.push(ttl::HeapNode{.key = std::string_view(it->second->key),
+                           .expires_at = it->second->expires_at,
+                           .ver = it->second->ver});
+    sieve_policy_->on_insert(*it->second.get());
     co_await check_memory_and_evict();
     co_return true;
 }

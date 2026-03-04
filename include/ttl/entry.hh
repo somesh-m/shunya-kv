@@ -42,5 +42,14 @@ struct Entry {
 
     // This adds the next/prev pointers directly inside the object
     bi::list_member_hook<bi::link_mode<bi::safe_link>> list_hook;
+
+    // provide a function to update the value
+    void update_from(Entry &&updated_object, bool update_ttl) {
+        this->value = std::move(updated_object.value);
+        if (update_ttl) {
+            this->expires_at = std::move(updated_object.expires_at);
+            this->ver += 1;
+        }
+    }
 };
 } // namespace ttl

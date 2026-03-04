@@ -62,7 +62,13 @@ class store {
     /**
      * Instance of sieve eviction policy
      */
-    std::optional<SievePolicy> sieve_policy_;
+    std::optional<SievePolicy> sieve_policy_{
+        std::in_place, eviction::EvictionConfig{
+                           .policy = eviction::PolicyKind::Sieve,
+                           .eviction_trigger_cutoff = 0.8,
+                           .eviction_stop_cutoff = 0.7,
+                           .eviction_budget = 512,
+                       }};
     /**
      * Instance of a priority queue to maintain ttls
      */
