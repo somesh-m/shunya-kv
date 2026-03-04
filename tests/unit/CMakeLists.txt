@@ -154,3 +154,53 @@ add_test(NAME NODE_INFO_CURRENT_CONN_TEST
 add_test(NAME NODE_INFO_OTHER_NODE_TEST
   COMMAND cmd_node_info_unit_test --run_test=NODE_INFO_OTHER_NODE_TEST
 )
+
+add_executable(sieve_policy_unit_test
+  sieve_policy_test.cc
+  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
+)
+
+target_include_directories(sieve_policy_unit_test PRIVATE
+  ${SHUNYA_INCLUDE_DIR}
+  ${SHUNYA_SRC_DIR}
+  ${CMAKE_SOURCE_DIR}/third_party/fnv
+)
+
+target_link_libraries(sieve_policy_unit_test PRIVATE
+  Seastar::seastar_testing
+  fmt::fmt
+  absl::flat_hash_map
+  fnv_ref
+)
+
+target_compile_definitions(sieve_policy_unit_test PRIVATE
+  SEASTAR_TESTING_MAIN
+)
+
+add_test(NAME SIEVE_POLICY_EVICTION_LOWER_BUDGET
+  COMMAND sieve_policy_unit_test --run_test=sieve_policy_eviction_lower_budget
+)
+
+add_test(NAME SIEVE_POLICY_EVICTION_HIGHER_BUDGET
+  COMMAND sieve_policy_unit_test --run_test=sieve_policy_eviction_higher_budget
+)
+
+add_test(NAME SIEVE_POLICY_NO_ENTRY
+  COMMAND sieve_policy_unit_test --run_test=sieve_policy_no_entry
+)
+
+add_test(NAME SIEVE_POLICY_WITH_KEYS_DELETION_SCENARIO_I
+  COMMAND sieve_policy_unit_test --run_test=sieve_policy_eviction_with_keys_deletion_scenario_I
+)
+
+add_test(NAME SIEVE_POLICY_WITH_KEYS_DELETION_SCENARIO_II
+  COMMAND sieve_policy_unit_test --run_test=sieve_policy_with_keys_deletion_scenario_II
+)
+
+add_test(NAME SIEVE_POLICY_NO_EVICTION
+  COMMAND sieve_policy_unit_test --run_test=sieve_policy_no_eviction
+)
+
+add_test(NAME SIEVE_POLICY_HAND_WRAP_AROUND
+  COMMAND sieve_policy_unit_test --run_test=sieve_policy_hand_wrap_around
+)

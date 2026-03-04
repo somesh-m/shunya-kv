@@ -43,10 +43,11 @@ seastar::future<std::vector<seastar::sstring>> SievePolicy::evict() {
     }
 
     std::size_t evicted_count = 0;
-    while (evicted_count < evCfg_.eviction_budget) {
-        if (hand_ == sieveList_.end()) {
-            hand_ = sieveList_.begin();
-        }
+    if (hand_ == sieveList_.end()) {
+        hand_ = sieveList_.begin();
+    }
+    while (evicted_count < evCfg_.eviction_budget &&
+           hand_ != sieveList_.end()) {
 
         ttl::Entry &cur = *hand_;
         if (cur.visited) {
@@ -57,13 +58,12 @@ seastar::future<std::vector<seastar::sstring>> SievePolicy::evict() {
 
         auto victim_it = hand_;
         ++hand_;
-        if (hand_ == sieveList_.end() && !sieveList_.empty()) {
-            hand_ = sieveList_.begin();
-        }
-
-        // Save pointer before erase
-        sieveList_.erase(victim_it);
         victim_list.push_back(victim_it->key);
+        sieveList_.erase(victim_it);
+        if (sieveList_.empty()) {
+            hand_ = sieveList_.end();
+            break;
+        }
 
         ++evicted_count;
         if (evicted_count % 100 == 0) {
