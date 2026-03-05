@@ -301,7 +301,8 @@ add_test(NAME OBJECT_POOL_DISTINCT_POINTER
 
 
 add_executable(resp_handler_unit_test
-  resp_handler_test.cc
+  resp_stream_extractor_test.cc
+  resp_request_test.cc
   ${SHUNYA_SRC_DIR}/conn/resp_handler.cc
   ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
   ${SHUNYA_SRC_DIR}/resp/resp_stream_processor.cc
@@ -393,4 +394,16 @@ add_test(NAME RESP_PARSER_STRESS
 
 add_test(NAME RESP_PARSER_MISSING_CRLF
   COMMAND resp_handler_unit_test --run_test=resp_processor_missing_crlf
+)
+
+add_test(NAME RESP_REQUEST_HANDLER_EMPTY_COMMAND
+  COMMAND resp_handler_unit_test --run_test=resp_request_handler_empty_command
+)
+
+add_test(NAME RESP_REQUEST_HANDLER_ERROR_COMMAND
+  COMMAND resp_handler_unit_test --run_test=resp_request_handler_error_command
+)
+
+add_test(NAME RESP_REQUEST_HANDLER_INVALID_COMMAND
+  COMMAND resp_handler_unit_test --run_test=resp_request_handler_invalid_command
 )
