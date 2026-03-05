@@ -239,6 +239,42 @@ add_test(NAME OBJECT_POOL_CREATE_OVERFLOW
   COMMAND object_pool_unit_test --run_test=object_pool_create_overflow
 )
 
+add_executable(orchestrator_unit_test
+  orchestrator_test.cc
+  ${SHUNYA_SRC_DIR}/conn/orchestrator.cc
+  ${SHUNYA_SRC_DIR}/conn/socket_server.cc
+  ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
+  ${SHUNYA_SRC_DIR}/conn/connections.cc
+  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
+  ${SHUNYA_SRC_DIR}/node_info_helpers.cc
+  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
+)
+
+target_include_directories(orchestrator_unit_test PRIVATE
+  ${SHUNYA_INCLUDE_DIR}
+  ${SHUNYA_SRC_DIR}
+  ${CMAKE_SOURCE_DIR}/third_party/fnv
+)
+
+target_link_libraries(orchestrator_unit_test PRIVATE
+  Seastar::seastar_testing
+  fmt::fmt
+  absl::flat_hash_map
+  fnv_ref
+)
+
+target_compile_definitions(orchestrator_unit_test PRIVATE
+  SEASTAR_TESTING_MAIN
+)
+
+add_test(NAME ORCHESTRATOR_START_STOP_HAPPY_PATH
+  COMMAND orchestrator_unit_test --run_test=ORCHESTRATOR_START_STOP_HAPPY_PATH
+)
+
+add_test(NAME ORCHESTRATOR_SET_HANDLER_AND_SERVE_REQUESTS
+  COMMAND orchestrator_unit_test --run_test=ORCHESTRATOR_SET_HANDLER_AND_SERVE_REQUESTS
+)
+
 add_test(NAME OBJECT_POOL_ACQUIRE_RELEASE
   COMMAND object_pool_unit_test --run_test=object_pool_acquire_release
 )
@@ -261,4 +297,100 @@ add_test(NAME OBJECT_POOL_MUTATE_FIELDS
 
 add_test(NAME OBJECT_POOL_DISTINCT_POINTER
   COMMAND object_pool_unit_test --run_test=object_pool_distinct_pointer
+)
+
+
+add_executable(resp_handler_unit_test
+  resp_handler_test.cc
+  ${SHUNYA_SRC_DIR}/conn/resp_handler.cc
+  ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
+  ${SHUNYA_SRC_DIR}/resp/resp_stream_processor.cc
+  ${SHUNYA_SRC_DIR}/commands.cc
+  ${SHUNYA_SRC_DIR}/cmd_set.cc
+  ${SHUNYA_SRC_DIR}/cmd_get.cc
+  ${SHUNYA_SRC_DIR}/cmd_quit.cc
+  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
+  ${SHUNYA_SRC_DIR}/node_info_helpers.cc
+  ${SHUNYA_SRC_DIR}/router.cc
+  ${SHUNYA_SRC_DIR}/kv_store.cc
+  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
+  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
+)
+
+target_include_directories(resp_handler_unit_test PRIVATE
+  ${SHUNYA_INCLUDE_DIR}
+  ${SHUNYA_SRC_DIR}
+  ${CMAKE_SOURCE_DIR}/third_party/fnv
+)
+
+target_link_libraries(resp_handler_unit_test PRIVATE
+  Seastar::seastar_testing
+  fmt::fmt
+  absl::flat_hash_map
+  fnv_ref
+)
+
+target_compile_definitions(resp_handler_unit_test PRIVATE
+  SEASTAR_TESTING_MAIN
+)
+
+add_test(NAME RESP_PARSER_SET_COMMAND_INCREMENTAL
+  COMMAND resp_handler_unit_test --run_test=resp_parser_set_command_incremental
+)
+
+add_test(NAME RESP_PARSER_GET_COMMAND_INCREMENTAL
+  COMMAND resp_handler_unit_test --run_test=resp_processor_get_command_incremental
+)
+
+add_test(NAME RESP_PARSER_SET_COMMAND
+  COMMAND resp_handler_unit_test --run_test=resp_processor_set_command
+)
+
+add_test(NAME RESP_PARSER_GET_COMMAND
+  COMMAND resp_handler_unit_test --run_test=resp_processor_get_command
+)
+
+add_test(NAME RESP_PARSER_INVALID_COMMAND_START_SEQUENCE
+  COMMAND resp_handler_unit_test --run_test=resp_processor_invalid_command_start_sequence
+)
+
+add_test(NAME RESP_PARSER_INVALID_ARG_COUNT_OVERFLOW
+  COMMAND resp_handler_unit_test --run_test=resp_processor_invalid_arg_count_overflow
+)
+
+add_test(NAME RESP_PARSER_INVALID_ARG_COUNT_UNDERFLOW
+  COMMAND resp_handler_unit_test --run_test=resp_processor_invalid_arg_count_underflow
+)
+
+add_test(NAME RESP_PARSER_MAX_ARG_COUNT
+  COMMAND resp_handler_unit_test --run_test=resp_processor_max_arg_count
+)
+
+add_test(NAME RESP_PARSER_MIN_ARG_COUNT
+  COMMAND resp_handler_unit_test --run_test=resp_processor_min_arg_count
+)
+
+add_test(NAME RESP_PARSER_COMMAND_PIPELINED
+  COMMAND resp_handler_unit_test --run_test=resp_processor_command_pipelined
+)
+
+add_test(NAME RESP_PARSER_COMMAND_PIPELINED_SPLIT
+  COMMAND resp_handler_unit_test --run_test=resp_processor_command_pipelined_split
+)
+
+add_test(NAME RESP_PARSER_COMMAND_PIPELINED_VALID_INVALID
+  COMMAND resp_handler_unit_test --run_test=resp_processor_command_pipelined_valid_invalid
+)
+
+add_test(NAME RESP_PARSER_BLANK_COMMAND
+  COMMAND resp_handler_unit_test --run_test=resp_processor_blank_command
+)
+
+add_test(NAME RESP_PARSER_STRESS
+  COMMAND resp_handler_unit_test --run_test=resp_processor_stress
+)
+
+add_test(NAME RESP_PARSER_MISSING_CRLF
+  COMMAND resp_handler_unit_test --run_test=resp_processor_missing_crlf
 )
