@@ -14,7 +14,7 @@
 namespace shunyakv {
 struct ParsedRequest {
     seastar::sstring frame; // owns bytes (optional)
-    resp::ArgvView argv;
+    resp::Array argv;
 };
 class connection;
 void set_send_shard_details_on_connect(bool enabled) noexcept;
