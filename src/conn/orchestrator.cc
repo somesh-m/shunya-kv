@@ -13,17 +13,33 @@ using namespace seastar;
 namespace shunyakv {
 static seastar::logger orch_logger("orchestrator");
 
-future<> socket_server_orchestrator::start() { return _server_dist->start(); }
+future<> socket_server_orchestrator::start() {
+    /**
+     * call sharded<Service>.start()
+     * This creates an instance of service on every core
+     */
+    return _server_dist->start();
+}
 future<> socket_server_orchestrator::stop() noexcept {
+    /**
+     * call sharded<Service>.stop()
+     * This stops all started instances and destroys them
+     */
     return _server_dist->stop();
 }
 future<> socket_server_orchestrator::set_handler(handler_factory_t handler) {
+    /**
+     * sets the handler on all shards
+     */
     return _server_dist->invoke_on_all(
         [handler = std::move(handler)](socket_server &server) mutable {
             server.set_handler(std::move(handler));
         });
 }
 future<> socket_server_orchestrator::listen(socket_address addr) {
+    /**
+     * listens to a given host port on all shards
+     */
     return _server_dist
         ->invoke_on_all<future<> (socket_server::*)(socket_address)>(
             &socket_server::listen, addr);
