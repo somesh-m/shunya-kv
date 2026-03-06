@@ -407,3 +407,44 @@ add_test(NAME RESP_REQUEST_HANDLER_ERROR_COMMAND
 add_test(NAME RESP_REQUEST_HANDLER_INVALID_COMMAND
   COMMAND resp_handler_unit_test --run_test=resp_request_handler_invalid_command
 )
+
+add_executable(socket_handler_unit_test
+  socket_handler_test.cc
+  ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
+  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
+  ${SHUNYA_SRC_DIR}/node_info_helpers.cc
+  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
+)
+
+target_include_directories(socket_handler_unit_test PRIVATE
+  ${SHUNYA_INCLUDE_DIR}
+  ${SHUNYA_SRC_DIR}
+  ${CMAKE_SOURCE_DIR}/third_party/fnv
+)
+
+target_link_libraries(socket_handler_unit_test PRIVATE
+  Seastar::seastar_testing
+  fmt::fmt
+  absl::flat_hash_map
+  fnv_ref
+)
+
+target_compile_definitions(socket_handler_unit_test PRIVATE
+  SEASTAR_TESTING_MAIN
+)
+
+add_test(NAME SOCKET_HANDLER_PIPELINING_SEMANTICS
+  COMMAND socket_handler_unit_test --run_test=socket_handler_pipelining_semantics
+)
+
+add_test(NAME SOCKET_HANDLER_BACKPRESSURE_TEST
+  COMMAND socket_handler_unit_test --run_test=socket_handler_backpressure_test
+)
+
+add_test(NAME SOCKET_HANDLER_PENDING_QUEUE
+  COMMAND socket_handler_unit_test --run_test=socket_handler_pending_queue
+)
+
+add_test(NAME SOCKET_HANDLER_STUCK_HANDLER
+  COMMAND socket_handler_unit_test --run_test=socket_handler_stuck_handler
+)

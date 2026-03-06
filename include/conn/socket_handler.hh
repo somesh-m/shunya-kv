@@ -8,6 +8,7 @@
 #include <seastar/core/circular_buffer.hh>
 #include <seastar/core/condition-variable.hh>
 #include <seastar/core/future.hh>
+#include <seastar/core/iostream.hh>
 #include <seastar/core/semaphore.hh>
 #include <seastar/core/sstring.hh>
 
@@ -36,6 +37,8 @@ class PipelinedSocketHandler : public SocketHandler {
 
     seastar::future<> read_loop(shunyakv::connection &c);
     seastar::future<> write_loop(shunyakv::connection &c);
+    seastar::future<> read_loop_impl(seastar::input_stream<char> &in);
+    seastar::future<> write_loop_impl(seastar::output_stream<char> &out);
 
     // ---- hooks for derived classes ----
     // Parse & schedule a response for ONE complete message (line/resp
@@ -44,7 +47,7 @@ class PipelinedSocketHandler : public SocketHandler {
     handle_request(shunyakv::ParsedRequest req) = 0;
 
     virtual std::optional<shunyakv::ParsedRequest>
-    try_extract_request(seastar::sstring &buf) = 0;
+    try_extract_request(seastar::sstring &buf);
 
   public:
     seastar::future<> process(shunyakv::connection &c) override;
