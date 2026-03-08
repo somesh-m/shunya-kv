@@ -244,9 +244,19 @@ add_executable(orchestrator_unit_test
   ${SHUNYA_SRC_DIR}/conn/orchestrator.cc
   ${SHUNYA_SRC_DIR}/conn/socket_server.cc
   ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
+  ${SHUNYA_SRC_DIR}/conn/resp_handler.cc
   ${SHUNYA_SRC_DIR}/conn/connections.cc
+  ${SHUNYA_SRC_DIR}/resp/resp_stream_processor.cc
+  ${SHUNYA_SRC_DIR}/commands.cc
+  ${SHUNYA_SRC_DIR}/cmd_set.cc
+  ${SHUNYA_SRC_DIR}/cmd_get.cc
+  ${SHUNYA_SRC_DIR}/cmd_quit.cc
   ${SHUNYA_SRC_DIR}/cmd_node_info.cc
   ${SHUNYA_SRC_DIR}/node_info_helpers.cc
+  ${SHUNYA_SRC_DIR}/router.cc
+  ${SHUNYA_SRC_DIR}/kv_store.cc
+  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 
@@ -273,6 +283,14 @@ add_test(NAME ORCHESTRATOR_START_STOP_HAPPY_PATH
 
 add_test(NAME ORCHESTRATOR_SET_HANDLER_AND_SERVE_REQUESTS
   COMMAND orchestrator_unit_test --run_test=ORCHESTRATOR_SET_HANDLER_AND_SERVE_REQUESTS
+)
+
+add_test(NAME ORCHESTRATOR_MULTIPLE_START_STOP
+  COMMAND orchestrator_unit_test --run_test=orchestrator_multiple_start_stop
+)
+
+add_test(NAME ORCHESTRATOR_PROTOCOL_SANITY
+  COMMAND orchestrator_unit_test --run_test=orchestrator_protocol_sanity
 )
 
 add_test(NAME OBJECT_POOL_ACQUIRE_RELEASE
