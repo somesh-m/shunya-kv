@@ -21,10 +21,21 @@ SievePolicy init(uint32_t budget) {
     map_.reserve(100);
     // Create an instance of sieve_policy_
     eviction::EvictionConfig ev_cfg{
-        .policy = eviction::PolicyKind::Sieve,
-        .eviction_trigger_cutoff = 0.8,
-        .eviction_stop_cutoff = 0.7,
-        .eviction_budget = budget,
+        .policy = eviction::EvictionPolicy::Sieve,
+        .soft_ =
+            {
+                .trigger = 0.6,
+                .stop = 0.5,
+                .budget = budget,
+                .throttle = false,
+            },
+        .hard_ =
+            {
+                .trigger = 0.8,
+                .stop = 0.7,
+                .budget = budget,
+                .throttle = true,
+            },
     };
 
     auto sieve_policy = SievePolicy(ev_cfg);

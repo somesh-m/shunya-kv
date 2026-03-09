@@ -3,7 +3,9 @@
 using namespace seastar;
 namespace shunyakv {
 
-future<> service::start() { return _store.start(this_shard_id()); }
+future<> service::start(const db_config &cfg) {
+    return _store.start(this_shard_id(), cfg);
+}
 
 future<> service::stop() { return _store.stop(); }
 

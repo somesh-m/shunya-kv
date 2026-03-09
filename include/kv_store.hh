@@ -1,5 +1,6 @@
 // kv_store.hh
 #pragma once
+#include "dbconfig.hh"
 #include "eviction/sieve_policy.hh"
 #include "kv_types.hh"
 #include "pool/object_pool.hh"
@@ -19,7 +20,7 @@ namespace shunyakv {
 class store {
 
   public:
-    future<> start(unsigned shard_id);
+    future<> start(unsigned shard_id, const db_config &cfg);
     future<> stop();
 
     /**
@@ -62,13 +63,8 @@ class store {
     /**
      * Instance of sieve eviction policy
      */
-    std::optional<SievePolicy> sieve_policy_{
-        std::in_place, eviction::EvictionConfig{
-                           .policy = eviction::PolicyKind::Sieve,
-                           .eviction_trigger_cutoff = 0.8,
-                           .eviction_stop_cutoff = 0.6,
-                           .eviction_budget = 1000,
-                       }};
+    eviction::EvictionConfig ev_cfg_{};
+    std::optional<SievePolicy> sieve_policy_;
     /**
      * Instance of a priority queue to maintain ttls
      */

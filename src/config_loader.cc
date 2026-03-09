@@ -48,6 +48,29 @@ static inline bool parse_u64(std::string_view v, uint64_t &out) {
     return false;
 }
 
+static inline bool parse_double(std::string_view v, double &out) {
+    try {
+        std::string s(v);
+        size_t idx = 0;
+        const double parsed = std::stod(s, &idx);
+        if (idx == s.size()) {
+            out = parsed;
+            return true;
+        }
+    } catch (...) {
+    }
+    return false;
+}
+
+static inline bool parse_policy(std::string_view v,
+                                eviction::EvictionPolicy &out) {
+    if (v == "sieve" || v == "SIEVE" || v == "Sieve") {
+        out = eviction::EvictionPolicy::Sieve;
+        return true;
+    }
+    return false;
+}
+
 void load_config_file(db_config &cfg, const char *path) {
     namespace fs = std::filesystem;
 
@@ -112,26 +135,64 @@ void load_config_file(db_config &cfg, const char *path) {
         } else if (key == "hash") {
             cfg.hash = seastar::sstring(value.data(), value.size());
         } else if (key == "policy") {
-            cfg.policy = seastar::sstring(value.data(), value.size());
-        } else if (key == "eviction_trigger_cutoff") {
-            uint64_t parsed = 0;
-            if (parse_u64(value, parsed)) {
-                cfg.eviction_trigger_cutoff = static_cast<std::size_t>(parsed);
+            eviction::EvictionPolicy parsed{};
+            if (parse_policy(value, parsed)) {
+                cfg.ev_config.policy = parsed;
             }
-        } else if (key == "eviction_stop_cutoff") {
-            uint64_t parsed = 0;
-            if (parse_u64(value, parsed)) {
-                cfg.eviction_stop_cutoff = static_cast<std::size_t>(parsed);
+        } else if (key == "soft_trigger") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.ev_config.soft_.trigger = parsed;
             }
-        } else if (key == "eviction_budget") {
+        } else if (key == "soft_stop") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.ev_config.soft_.stop = parsed;
+            }
+        } else if (key == "soft_budget") {
             uint64_t parsed = 0;
             if (parse_u64(value, parsed)) {
-                cfg.eviction_budget = static_cast<std::size_t>(parsed);
+                cfg.ev_config.soft_.budget = parsed;
+            }
+        } else if (key == "soft_throttle") {
+            bool parsed = false;
+            if (parse_bool(value, parsed)) {
+                cfg.ev_config.soft_.throttle = parsed;
+            }
+        } else if (key == "hard_trigger") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.ev_config.hard_.trigger = parsed;
+            }
+        } else if (key == "hard_stop") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.ev_config.hard_.stop = parsed;
+            }
+        } else if (key == "hard_budget") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.ev_config.hard_.budget = parsed;
+            }
+        } else if (key == "hard_throttle") {
+            bool parsed = false;
+            if (parse_bool(value, parsed)) {
+                cfg.ev_config.hard_.throttle = parsed;
             }
         } else if (key == "send_shard_details_on_connect") {
             bool parsed = false;
             if (parse_bool(value, parsed)) {
                 cfg.send_shard_details_on_connect = parsed;
+            }
+        } else if (key == "page_size_goal") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.page_size_goal = static_cast<std::size_t>(parsed);
+            }
+        } else if (key == "key_reserve") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.key_reserve = static_cast<std::size_t>(parsed);
             }
         }
     }

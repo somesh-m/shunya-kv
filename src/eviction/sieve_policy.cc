@@ -35,9 +35,9 @@ void SievePolicy::on_erase(ttl::Entry &e) {
     }
 }
 
-seastar::future<std::vector<seastar::sstring>> SievePolicy::evict() {
+seastar::future<std::vector<seastar::sstring>>
+SievePolicy::evict() {
     std::vector<seastar::sstring> victim_list;
-    sieve_logger.info("eviction budget {}", evCfg_.eviction_budget);
     if (sieveList_.empty()) {
         co_return victim_list;
     }
@@ -48,8 +48,7 @@ seastar::future<std::vector<seastar::sstring>> SievePolicy::evict() {
 
     std::size_t evicted_count = 0;
 
-    while (evicted_count < evCfg_.eviction_budget &&
-           hand_ != sieveList_.end()) {
+    while (evicted_count < evictParams.budget && hand_ != sieveList_.end()) {
 
         ttl::Entry &cur = *hand_;
         if (cur.visited) {

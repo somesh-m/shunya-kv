@@ -1,4 +1,5 @@
 #pragma once
+#include "dbconfig.hh"
 #include "kv_store.hh"
 #include "router_metrics.hh"
 
@@ -18,7 +19,7 @@ namespace shunyakv {
 
 class service {
   public:
-    future<> start();
+    future<> start(const db_config &cfg);
     future<> stop();
     future<bool> local_set(std::string_view, sstring);
     future<bool> local_set(std::string_view, sstring, uint64_t);

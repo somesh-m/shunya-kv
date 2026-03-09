@@ -5,6 +5,7 @@
 #include "ttl/heap_node.hh"
 #include <chrono>
 #include <coroutine>
+#include <eviction/eviction_config.hh>
 #include <memory>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/memory.hh>
@@ -44,9 +45,13 @@ insert_with_growth_trace(absl::flat_hash_map<key_t, seastar::sstring> &map,
     }
     return true;
 }
+
+const char *to_string(eviction::EvictionType type) {
+    return type == eviction::EvictionType::soft ? "soft" : "hard";
+}
 } // namespace
 
-seastar::future<> store::start(unsigned) {
+seastar::future<> store::start(unsigned, const db_config &cfg) {
     /**
      * Reserve a large amount here so that it doesn't reallocate while the db is
      * running.
@@ -54,14 +59,9 @@ seastar::future<> store::start(unsigned) {
     _map.reserve(27000'00);
 
     co_await entry_pool_.init();
+    ev_cfg_ = cfg.ev_config;
     if (!sieve_policy_.has_value()) {
-        eviction::EvictionConfig ev_cfg{
-            .policy = eviction::PolicyKind::Sieve,
-            .eviction_trigger_cutoff = 0.8,
-            .eviction_stop_cutoff = 0.7,
-            .eviction_budget = 512,
-        };
-        sieve_policy_.emplace(ev_cfg);
+        sieve_policy_.emplace(ev_cfg_);
     }
 
     co_return;
@@ -123,8 +123,6 @@ seastar::future<bool> store::set_with_ttl(std::string_view key_view,
     pooled_entry->value = std::move(value);
     pooled_entry->expires_at = now_s() + ttl;
 
-    // TODO:Ensure the std::move doesn't happen in case if the key is already
-    // present
     auto [it, inserted] =
         _map.try_emplace(seastar::sstring(key_view), std::move(pooled_entry));
     if (!inserted) {
@@ -183,14 +181,21 @@ seastar::future<> store::check_memory_and_evict() {
     double usage_fraction = static_cast<double>(currently_used) / limit;
 
     // 3. Trigger eviction if over threshold (e.g., 80%)
-    if (usage_fraction > 0.8) {
-        kv_store_log.info("Memory pressure high {}, evicting keys.",
-                          usage_fraction);
+    const double hard_trigger = ev_cfg_.hard_.trigger;
+    const double soft_trigger = ev_cfg_.soft_.trigger;
+    eviction::EvictConfig config;
+    eviction::EvictionType type;
+
+    if (usage_fraction >= hard_trigger || usage_fraction >= soft_trigger) {
+        type = usage_fraction >= hard_trigger ? eviction::EvictionType::hard
+                                              : eviction::EvictionType::soft;
+        sieve_policy_->set_eviction_type(type);
+        kv_store_log.info("Starting {} eviction\n Usage fraction {}",
+                          to_string(type), usage_fraction);
         // Always do ttl eviction before any other eviction
         co_await evict_ttl_keys(now_s(), 300);
         if (!sieve_policy_.has_value())
             co_return;
-        kv_store_log.info("Doing sieve policy eviction");
         const auto sieve_victims = co_await sieve_policy_->evict();
         kv_store_log.info("Victim Keys {}", sieve_victims.size());
         for (const auto &key : sieve_victims) {
