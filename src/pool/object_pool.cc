@@ -2,13 +2,15 @@
 #include <seastar/core/coroutine.hh>
 
 seastar::future<> CacheEntryPool::prepopulate_pool() {
-
+    pool_.reserve(max_size_);
     pool_logger().info("Prepopulating {} ", max_size_);
     for (std::size_t i = 0; i < max_size_; i++) {
-        pool_.push_back(std::make_unique<ttl::Entry>());
-        // if (i % 500 == 0) {
-        //     co_await seastar::coroutine::maybe_yield();
-        // }
+        auto entry = std::make_unique<ttl::Entry>();
+        entry->value.reserve(value_offset_);
+        pool_.push_back(std::move(entry));
+        if (i % 500 == 0) {
+            co_await seastar::coroutine::maybe_yield();
+        }
     }
     pool_logger().info("Pool size {} ", pool_.size());
     co_return;
@@ -21,6 +23,7 @@ seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
     if (pool_.empty()) {
         pool_logger().info("Bucket empty, generating new object");
         auto entry = std::make_unique<ttl::Entry>();
+        entry->value.reserve(value_offset_);
         entry->in_use_ = true;
         co_return entry;
     }
@@ -44,6 +47,12 @@ void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
     entry->ver = 0;
     entry->heat = 0;
     entry->last_access = 0;
+
+    if (entry->value.capacity() > value_offset_ * 2) {
+        std::string tmp;
+        tmp.reserve(value_offset_);
+        entry->value.swap(tmp);
+    }
 
     if (pool_.size() < max_size_) {
         pool_.push_back(std::move(entry));

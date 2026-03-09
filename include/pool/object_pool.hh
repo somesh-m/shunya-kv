@@ -57,8 +57,8 @@ class CacheEntryPool {
 
   private:
     seastar::circular_buffer<std::unique_ptr<ttl::Entry>> pool_;
-    std::size_t value_offset_ = 65536;
-    double allowed_percentage_total_mem_ = 0.8;
+    std::size_t value_offset_ = 65432;
+    double allowed_percentage_total_mem_ = 0.6;
     std::size_t max_size_ = 1024;
     bool initialized_ = false;
     std::shared_ptr<SievePolicy> policy_;
