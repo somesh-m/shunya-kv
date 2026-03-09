@@ -31,8 +31,8 @@ SievePolicy init(uint32_t budget) {
     return sieve_policy;
 }
 
-void createEntry(uint32_t entry_count, SievePolicy &policy) {
-    for (uint32_t i = 1; i <= entry_count; i++) {
+void createEntry(uint32_t start, uint32_t end, SievePolicy &policy) {
+    for (uint32_t i = start; i <= end; i++) {
         std::string str_offset = std::to_string(i);
         seastar::sstring key = "test_key_" + str_offset;
         auto [it, inserted] = map_.emplace(key, ttl::Entry{});
@@ -45,6 +45,10 @@ void createEntry(uint32_t entry_count, SievePolicy &policy) {
         it->second.visited = false;
         policy.on_insert(it->second);
     }
+}
+
+void createEntry(uint32_t entry_count, SievePolicy &policy) {
+    createEntry(1, entry_count, policy);
 }
 
 // start and end are inclusive
@@ -284,14 +288,14 @@ SEASTAR_TEST_CASE(sieve_policy_with_keys_deletion_scenario_II) {
  * Insert 10 entries, budget = 5.
  *
  * Action:
- * 1. Evict 5 entries (Hand moves halfway or to end depending on visited bits).
- * 2. Hit the remaining 5 entries (to protect them).
- * 3. Insert 5 NEW entries (at the tail).
+ * 1. First eviction pass clears the visited bit on the initial 10 entries.
+ * 2. Hit keys 6-10 to protect them.
+ * 3. Insert 5 NEW entries (11-15) at the tail.
  * 4. Evict again.
  *
  * Expected:
- * The hand should wrap around and eventually find the new entries or
- * unvisited old entries.
+ * The hand should advance past the protected keys, wrap if needed, and evict
+ * five unprotected keys.
  */
 SEASTAR_TEST_CASE(sieve_policy_hand_wrap_around) {
     SievePolicy policy = init(5);
@@ -300,27 +304,23 @@ SEASTAR_TEST_CASE(sieve_policy_hand_wrap_around) {
     // 1. Setup initial state (Keys 1-10)
     createEntry(10, policy);
 
-    // 2. Initial eviction to move the hand
-    // (In Sieve, new entries are usually unvisited, so this should take 5)
+    // 2. Initial eviction clears the visited bits on the first pass.
     victim_list = co_await policy.evict();
-    BOOST_REQUIRE_EQUAL(victim_list.size(), 5);
+    BOOST_REQUIRE_EQUAL(victim_list.size(), 0);
 
-    // 3. Protect the remaining 5 original keys (Keys 6-10, assuming 1-5 were
-    // evicted)
+    // 3. Protect the last 5 original keys.
     set protected_keys = hitEntry(6, 10, policy);
+    BOOST_REQUIRE_EQUAL(protected_keys.size(), 5);
 
     // 4. Insert 5 NEW keys (Keys 11-15)
-    // These are added to the tail. The hand is currently somewhere in the
-    // middle.
-    createEntry(5, policy);
+    createEntry(11, 15, policy);
 
     // 5. Evict with a budget of 5
-    // The hand must traverse the protected keys (clearing their bits)
-    // and wrap/reach the new keys.
+    // The hand must traverse the protected keys and find the unprotected old
+    // entries first.
     victim_list = co_await policy.evict();
 
-    // We expect 5 evictions. If the hand was "stuck" at the end, this would
-    // fail.
+    // The expected victims are the old unprotected keys 1-5.
     BOOST_REQUIRE_EQUAL(victim_list.size(), 5);
 
     for (auto &victim : victim_list) {

@@ -7,23 +7,39 @@ from pathlib import Path
 
 
 class ServerProcess:
-    def __init__(self, binary: Path, port: int, smp: int = 1) -> None:
+    def __init__(
+        self,
+        binary: Path,
+        port: int,
+        smp: int = 1,
+        memory: str | None = None,
+        log_path: Path | None = None,
+    ) -> None:
         self.binary = binary
         self.port = port
         self.smp = smp
+        self.memory = memory
+        self.log_path = log_path or Path(f"/tmp/shunya_store_debug_{port}.log")
         self.process: subprocess.Popen[str] | None = None
+        self._log_file = None
 
     def start(self) -> None:
         env = os.environ.copy()
+        cmd = [
+            str(self.binary),
+            "--port",
+            str(self.port),
+            "--smp",
+            str(self.smp),
+        ]
+        if self.memory is not None:
+            cmd.extend(["--memory", self.memory])
+
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._log_file = self.log_path.open("w", encoding="utf-8")
         self.process = subprocess.Popen(
-            [
-                str(self.binary),
-                "--port",
-                str(self.port),
-                "--smp",
-                str(self.smp),
-            ],
-            stdout=subprocess.PIPE,
+            cmd,
+            stdout=self._log_file,
             stderr=subprocess.STDOUT,
             text=True,
             cwd=self.binary.parent,
@@ -42,6 +58,9 @@ class ServerProcess:
                 self.process.kill()
                 self.process.wait(timeout=5)
         self.process = None
+        if self._log_file is not None:
+            self._log_file.close()
+            self._log_file = None
 
     def _wait_until_ready(self, timeout_s: float = 10.0) -> None:
         deadline = time.time() + timeout_s
@@ -49,9 +68,8 @@ class ServerProcess:
             if self.process is None:
                 break
             if self.process.poll() is not None:
-                output = self.process.stdout.read() if self.process.stdout else ""
                 raise RuntimeError(
-                    f"server exited before becoming ready:\n{output}"
+                    f"server exited before becoming ready; see log at {self.log_path}"
                 )
 
             try:

@@ -190,7 +190,9 @@ seastar::future<> store::check_memory_and_evict() {
         co_await evict_ttl_keys(now_s(), 300);
         if (!sieve_policy_.has_value())
             co_return;
+        kv_store_log.info("Doing sieve policy eviction");
         const auto sieve_victims = co_await sieve_policy_->evict();
+        kv_store_log.info("Victim Keys {}", sieve_victims.size());
         for (const auto &key : sieve_victims) {
             uint32_t count = 0;
             auto node = _map.extract(key);

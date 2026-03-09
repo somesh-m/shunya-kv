@@ -250,6 +250,7 @@ add_executable(orchestrator_unit_test
   ${SHUNYA_SRC_DIR}/commands.cc
   ${SHUNYA_SRC_DIR}/cmd_set.cc
   ${SHUNYA_SRC_DIR}/cmd_get.cc
+  ${SHUNYA_SRC_DIR}/cmd_info.cc
   ${SHUNYA_SRC_DIR}/cmd_quit.cc
   ${SHUNYA_SRC_DIR}/cmd_node_info.cc
   ${SHUNYA_SRC_DIR}/node_info_helpers.cc
@@ -327,6 +328,7 @@ add_executable(resp_handler_unit_test
   ${SHUNYA_SRC_DIR}/commands.cc
   ${SHUNYA_SRC_DIR}/cmd_set.cc
   ${SHUNYA_SRC_DIR}/cmd_get.cc
+  ${SHUNYA_SRC_DIR}/cmd_info.cc
   ${SHUNYA_SRC_DIR}/cmd_quit.cc
   ${SHUNYA_SRC_DIR}/cmd_node_info.cc
   ${SHUNYA_SRC_DIR}/node_info_helpers.cc

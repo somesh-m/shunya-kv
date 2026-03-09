@@ -1,5 +1,8 @@
 #include "eviction/sieve_policy.hh"
 #include "ttl/entry.hh"
+#include <seastar/util/log.hh>
+
+static seastar::logger sieve_logger{"sieve_policy"};
 
 void SievePolicy::on_insert(ttl::Entry &e) {
     e.visited = true;
@@ -34,6 +37,7 @@ void SievePolicy::on_erase(ttl::Entry &e) {
 
 seastar::future<std::vector<seastar::sstring>> SievePolicy::evict() {
     std::vector<seastar::sstring> victim_list;
+    sieve_logger.info("eviction budget {}", evCfg_.eviction_budget);
     if (sieveList_.empty()) {
         co_return victim_list;
     }
@@ -43,9 +47,7 @@ seastar::future<std::vector<seastar::sstring>> SievePolicy::evict() {
     }
 
     std::size_t evicted_count = 0;
-    if (hand_ == sieveList_.end()) {
-        hand_ = sieveList_.begin();
-    }
+
     while (evicted_count < evCfg_.eviction_budget &&
            hand_ != sieveList_.end()) {
 
@@ -66,7 +68,7 @@ seastar::future<std::vector<seastar::sstring>> SievePolicy::evict() {
         }
 
         ++evicted_count;
-        if (evicted_count % 100 == 0) {
+        if (evicted_count % 500 == 0) {
             co_await seastar::coroutine::maybe_yield();
         }
     }

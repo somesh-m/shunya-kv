@@ -2,12 +2,15 @@
 #include <seastar/core/coroutine.hh>
 
 seastar::future<> CacheEntryPool::prepopulate_pool() {
+
+    pool_logger().info("Prepopulating {} ", max_size_);
     for (std::size_t i = 0; i < max_size_; i++) {
         pool_.push_back(std::make_unique<ttl::Entry>());
-        if (i % 100 == 0) {
-            co_await seastar::coroutine::maybe_yield();
-        }
+        // if (i % 500 == 0) {
+        //     co_await seastar::coroutine::maybe_yield();
+        // }
     }
+    pool_logger().info("Pool size {} ", pool_.size());
     co_return;
 }
 
@@ -16,6 +19,7 @@ std::size_t CacheEntryPool::get_total_slots() { return max_size_; }
 
 seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
     if (pool_.empty()) {
+        pool_logger().info("Bucket empty, generating new object");
         auto entry = std::make_unique<ttl::Entry>();
         entry->in_use_ = true;
         co_return entry;
@@ -43,7 +47,9 @@ void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
 
     if (pool_.size() < max_size_) {
         pool_.push_back(std::move(entry));
+        return;
     }
+    entry.reset();
 }
 
 std::size_t CacheEntryPool::get_per_entry_size_estimate() {
@@ -61,8 +67,10 @@ std::size_t CacheEntryPool::calculate_optimal_pool_size() noexcept {
     const std::size_t target_memory = get_usable_memory();
     const std::size_t estimated_entry_size = get_per_entry_size_estimate();
     const std::size_t pool_size = target_memory / estimated_entry_size;
-    pool_logger().info("Shard Id: {} Usable Memory: {} GB Pool Count: {}",
+    pool_logger().info("Shard Id: {}\n Usable Memory: {} GB \nPool Count: {}\n "
+                       "Estimated entry size {} \n",
                        seastar::this_shard_id(),
-                       target_memory / (1024 * 1024 * 1024), pool_size);
+                       target_memory / (1024.0 * 1024.0 * 1024.0), pool_size,
+                       estimated_entry_size);
     return pool_size;
 }

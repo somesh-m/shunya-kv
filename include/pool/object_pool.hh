@@ -26,12 +26,15 @@ class CacheEntryPool {
             std::size_t estimated_per_entry_size =
                 get_per_entry_size_estimate();
             std::size_t total_mem_req = estimated_per_entry_size * max_size;
+
             if (total_mem_req > get_usable_memory()) {
                 max_size_ = calculate_optimal_pool_size();
                 pool_logger().info("Pool size overflow. Requested {} Feasible "
                                    "{}. Falling back to max entry possible",
                                    max_size, max_size_);
             }
+
+            pool_logger().info("Allocated max pool {}", max_size_);
         }
     }
 
@@ -54,7 +57,7 @@ class CacheEntryPool {
 
   private:
     seastar::circular_buffer<std::unique_ptr<ttl::Entry>> pool_;
-    std::size_t value_offset_ = 4096;
+    std::size_t value_offset_ = 65536;
     double allowed_percentage_total_mem_ = 0.8;
     std::size_t max_size_ = 1024;
     bool initialized_ = false;
