@@ -4,6 +4,7 @@
 #include "router_metrics.hh"
 
 #include "hotpath_metrics.hh"
+#include "shard_stats.hh"
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -31,6 +32,7 @@ class service {
     void record_cache_miss() noexcept;
     request_counters snapshot_request_counters() const noexcept;
     request_latency_counters snapshot_request_latency_counters() const noexcept;
+    shard_stats_snapshot snapshot_shard_stats() const noexcept;
 
   private:
     store _store;

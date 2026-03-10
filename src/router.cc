@@ -57,4 +57,8 @@ service::snapshot_request_latency_counters() const noexcept {
     return _latency_counters;
 }
 
+shard_stats_snapshot service::snapshot_shard_stats() const noexcept {
+    return _store.snapshot_stats();
+}
+
 } // namespace shunyakv

@@ -25,6 +25,7 @@ struct STATS {
     size_t allocated_mem;
     size_t total_mem;
     uint64_t failed_alloc;
+    shard_stats_snapshot shard_stats;
 };
 
 namespace {
@@ -37,6 +38,7 @@ STATS collect_statistics() {
     stats.free_mem = mem_stats.free_memory();
     stats.total_mem = mem_stats.total_memory();
     stats.failed_alloc = mem_stats.failed_allocations();
+    stats.shard_stats = shunyakv::local_service().snapshot_shard_stats();
     return stats;
 }
 
@@ -72,8 +74,8 @@ seastar::future<> handle_info(const resp::ArgvView &cmd,
     std::vector<seastar::future<STATS>> futures;
     futures.reserve(seastar::smp::count);
     for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
-        futures.emplace_back(
-            seastar::smp::submit_to(shard, [] { return collect_statistics(); }));
+        futures.emplace_back(seastar::smp::submit_to(
+            shard, [] { return collect_statistics(); }));
     }
 
     auto per_shard =
@@ -91,13 +93,21 @@ seastar::future<> handle_info(const resp::ArgvView &cmd,
         total.allocated_mem += stats.allocated_mem;
         total.total_mem += stats.total_mem;
         total.failed_alloc += stats.failed_alloc;
+        // total.cache_miss += stats.cache_miss;
+        // total.eviction_count += stats.eviction_count;
 
         payload += seastar::format(
             "shard_{}\nallocated_memory: {}\nfree_memory: {}\ntotal_memory: "
-            "{}\ntotal_allocs: {}\nfailed_allocs: {}\n\n",
+            "{}\ntotal_allocs: {}\nfailed_allocs: {}\npool_total_slots: "
+            "{}\npool_available_slots: {}\npool_fallback_allocs: "
+            "{}\nkey_count: {}\ncache_miss: {}\neviction_count: {}\n\n",
             shard, format_bytes(stats.allocated_mem),
             format_bytes(stats.free_mem), format_bytes(stats.total_mem),
-            stats.total_allocs, stats.failed_alloc);
+            stats.total_allocs, stats.failed_alloc,
+            stats.shard_stats.pool_total_slots,
+            stats.shard_stats.pool_available_slots,
+            stats.shard_stats.pool_fallback_allocs, stats.shard_stats.key_count,
+            stats.shard_stats.cache_miss, stats.shard_stats.eviction_count);
     }
 
     payload += "# Cumulative\r\n";
@@ -105,8 +115,7 @@ seastar::future<> handle_info(const resp::ArgvView &cmd,
         "allocated_memory: {}\nfree_memory: {}\ntotal_memory: {}\n"
         "total_allocs: {}\nfailed_allocs: {}\n",
         format_bytes(total.allocated_mem), format_bytes(total.free_mem),
-        format_bytes(total.total_mem), total.total_allocs,
-        total.failed_alloc);
+        format_bytes(total.total_mem), total.total_allocs, total.failed_alloc);
 
     co_await resp::write_bulk(out, seastar::sstring(payload));
     co_return;

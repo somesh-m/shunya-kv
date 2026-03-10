@@ -139,11 +139,6 @@ void load_config_file(db_config &cfg, const char *path) {
             if (parse_policy(value, parsed)) {
                 cfg.ev_config.policy = parsed;
             }
-        } else if (key == "soft_trigger") {
-            double parsed = 0.0;
-            if (parse_double(value, parsed)) {
-                cfg.ev_config.soft_.trigger = parsed;
-            }
         } else if (key == "soft_stop") {
             double parsed = 0.0;
             if (parse_double(value, parsed)) {
@@ -158,11 +153,6 @@ void load_config_file(db_config &cfg, const char *path) {
             bool parsed = false;
             if (parse_bool(value, parsed)) {
                 cfg.ev_config.soft_.throttle = parsed;
-            }
-        } else if (key == "hard_trigger") {
-            double parsed = 0.0;
-            if (parse_double(value, parsed)) {
-                cfg.ev_config.hard_.trigger = parsed;
             }
         } else if (key == "hard_stop") {
             double parsed = 0.0;

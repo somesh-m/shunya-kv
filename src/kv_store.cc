@@ -56,9 +56,13 @@ seastar::future<> store::start(unsigned, const db_config &cfg) {
      * Reserve a large amount here so that it doesn't reallocate while the db is
      * running.
      */
+
+    set_usable_memory(cfg.memory_reserve_percentage);
+    kv_store_log.info("Memory reserve percent {}, usable memory {}",
+                      cfg.memory_reserve_percentage, usable_memory_);
     _map.reserve(27000'00);
 
-    co_await entry_pool_.init();
+    co_await entry_pool_.init(usable_memory_, cfg.pool_max_memory_percent);
     ev_cfg_ = cfg.ev_config;
     if (!sieve_policy_.has_value()) {
         sieve_policy_.emplace(ev_cfg_);
@@ -76,6 +80,9 @@ seastar::future<> store::stop() {
 
 seastar::future<bool> store::set(std::string_view key_view,
                                  seastar::sstring value) {
+    if (entry_pool_.get_available_slots() == 0) {
+        stats_.record_pool_fallback_alloc();
+    }
     auto pooled_entry = co_await entry_pool_.acquire();
     if (!pooled_entry) {
         co_return false;
@@ -109,6 +116,9 @@ seastar::future<bool> store::set(std::string_view key_view,
 seastar::future<bool> store::set_with_ttl(std::string_view key_view,
                                           seastar::sstring value,
                                           uint64_t ttl) {
+    if (entry_pool_.get_available_slots() == 0) {
+        stats_.record_pool_fallback_alloc();
+    }
     auto pooled_entry = co_await entry_pool_.acquire();
     if (!pooled_entry) {
         co_return false;
@@ -168,6 +178,17 @@ store::get(std::string_view key) {
     co_return std::optional<seastar::sstring>(entry_ptr->value);
 }
 
+void store::set_usable_memory(double reserve_percentage) {
+    auto stats = seastar::memory::stats();
+    // Keeping 15 percent reserved for seastar overhead
+    usable_memory_ = (1 - reserve_percentage) * stats.total_memory();
+}
+
+shard_stats_snapshot store::snapshot_stats() const noexcept {
+    return stats_.snapshot(entry_pool_.get_available_slots(),
+                           entry_pool_.get_total_slots(), _map.size());
+}
+
 seastar::future<> store::check_memory_and_evict() {
     // 1. Get memory statistics for the current shard
     auto stats = seastar::memory::stats();
@@ -175,34 +196,42 @@ seastar::future<> store::check_memory_and_evict() {
     // total_memory() is the maximum allowed for this shard
     // allocated_memory() is what is currently used
     size_t currently_used = stats.allocated_memory();
-    size_t limit = stats.total_memory();
+    // size_t limit = stats.total_memory();
+    size_t limit = usable_memory_;
 
     // 2. Calculate percentage
-    double usage_fraction = static_cast<double>(currently_used) / limit;
+    double total_memory_usage_fraction =
+        static_cast<double>(currently_used) / limit;
+    double pool_usage_fraction =
+        entry_pool_.get_used_slots() / entry_pool_.get_total_slots();
 
     // 3. Trigger eviction if over threshold (e.g., 80%)
     const double hard_trigger = ev_cfg_.hard_.trigger;
     const double soft_trigger = ev_cfg_.soft_.trigger;
     eviction::EvictConfig config;
     eviction::EvictionType type;
-
-    if (usage_fraction >= hard_trigger || usage_fraction >= soft_trigger) {
-        type = usage_fraction >= hard_trigger ? eviction::EvictionType::hard
-                                              : eviction::EvictionType::soft;
+    // soft eviction applies on pool and hard trigger on total memory
+    if (total_memory_usage_fraction >= hard_trigger ||
+        pool_usage_fraction >= soft_trigger) {
+        type = total_memory_usage_fraction >= hard_trigger
+                   ? eviction::EvictionType::hard
+                   : eviction::EvictionType::soft;
         sieve_policy_->set_eviction_type(type);
-        kv_store_log.info("Starting {} eviction\n Usage fraction {}",
-                          to_string(type), usage_fraction);
+        HOTPATHLOGS(
+            kv_store_log.info("Starting {} eviction\n Usage fraction {}",
+                              to_string(type), usage_fraction));
         // Always do ttl eviction before any other eviction
         co_await evict_ttl_keys(now_s(), 300);
         if (!sieve_policy_.has_value())
             co_return;
         const auto sieve_victims = co_await sieve_policy_->evict();
-        kv_store_log.info("Victim Keys {}", sieve_victims.size());
+        HOTPATHLOGS(kv_store_log.info("Victim Keys {}", sieve_victims.size()));
         for (const auto &key : sieve_victims) {
             uint32_t count = 0;
             auto node = _map.extract(key);
             if (!node.empty()) {
                 entry_pool_.release(std::move(node.mapped()));
+                stats_.record_eviction();
             }
             count++;
             if (count % 100 == 0) {

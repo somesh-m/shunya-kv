@@ -23,8 +23,8 @@
     const auto start = std::chrono::steady_clock::now();
 
 #define HOTPATH_END(start, call)                                               \
-    call(std::chrono::duration_cast<std::chrono::microseconds>(               \
-             std::chrono::steady_clock::now() - start)                        \
+    call(std::chrono::duration_cast<std::chrono::microseconds>(                \
+             std::chrono::steady_clock::now() - start)                         \
              .count());
 #else
 #define HOTPATH_START(start)
@@ -33,15 +33,15 @@
 
 #if SHUNYAKV_ENABLE_HOT_PATH_DEBUG
 
-#define HOTPATHCOUNT(stmt)                                         \
-                do {                                                           \
-                    stmt;                                                      \
-                } while (0)
+#define HOTPATHCOUNT(stmt)                                                     \
+    do {                                                                       \
+        stmt;                                                                  \
+    } while (0)
 
 #else
 
-#define HOTPATHCOUNT(stmt)                                         \
-                do {                                                           \
-                } while (0)
+#define HOTPATHCOUNT(stmt)                                                     \
+    do {                                                                       \
+    } while (0)
 
 #endif

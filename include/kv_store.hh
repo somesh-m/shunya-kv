@@ -4,6 +4,7 @@
 #include "eviction/sieve_policy.hh"
 #include "kv_types.hh"
 #include "pool/object_pool.hh"
+#include "shard_stats.hh"
 #include "ttl/entry.hh"
 #include "ttl/heap_node.hh"
 #include <absl/container/flat_hash_map.h>
@@ -39,6 +40,7 @@ class store {
      */
     future<bool> set_with_ttl(std::string_view key, sstring value,
                               uint64_t ttl);
+    shard_stats_snapshot snapshot_stats() const noexcept;
 
     /**
      * Perform TTL eviction
@@ -47,6 +49,8 @@ class store {
     inline bool is_expired(uint64_t now, uint64_t expires_at) {
         return now >= expires_at;
     }
+
+    void set_usable_memory(double reseve_percentage);
 
   private:
     future<> check_memory_and_evict();
@@ -64,7 +68,9 @@ class store {
      * Instance of sieve eviction policy
      */
     eviction::EvictionConfig ev_cfg_{};
+    std::size_t usable_memory_;
     std::optional<SievePolicy> sieve_policy_;
+    shard_stats stats_;
     /**
      * Instance of a priority queue to maintain ttls
      */
