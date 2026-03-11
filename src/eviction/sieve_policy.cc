@@ -4,6 +4,10 @@
 
 static seastar::logger sieve_logger{"sieve_policy"};
 
+inline bool is_expired(uint64_t now, uint64_t expires_at) {
+    return expires_at != 0 && now >= expires_at;
+}
+
 void SievePolicy::on_insert(ttl::Entry &e) {
     e.visited = true;
 
@@ -36,7 +40,7 @@ void SievePolicy::on_erase(ttl::Entry &e) {
 }
 
 seastar::future<std::vector<seastar::sstring>>
-SievePolicy::evict() {
+SievePolicy::evict(uint64_t now) {
     std::vector<seastar::sstring> victim_list;
     if (sieveList_.empty()) {
         co_return victim_list;
@@ -51,22 +55,23 @@ SievePolicy::evict() {
     while (evicted_count < evictParams.budget && hand_ != sieveList_.end()) {
 
         ttl::Entry &cur = *hand_;
-        if (cur.visited) {
+        if (is_expired(now, cur.expires_at) || !cur.visited) {
+            auto victim_it = hand_;
+            ++hand_;
+            victim_list.push_back(victim_it->key);
+            sieveList_.erase(victim_it);
+            if (sieveList_.empty()) {
+                hand_ = sieveList_.end();
+                break;
+            }
+
+            ++evicted_count;
+        } else {
             cur.visited = false;
             ++hand_;
             continue;
         }
 
-        auto victim_it = hand_;
-        ++hand_;
-        victim_list.push_back(victim_it->key);
-        sieveList_.erase(victim_it);
-        if (sieveList_.empty()) {
-            hand_ = sieveList_.end();
-            break;
-        }
-
-        ++evicted_count;
         if (evicted_count % 500 == 0) {
             co_await seastar::coroutine::maybe_yield();
         }

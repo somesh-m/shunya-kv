@@ -35,7 +35,10 @@ class service {
     shard_stats_snapshot snapshot_shard_stats() const noexcept;
 
   private:
+    future<> ensure_started();
+
     store _store;
+    bool _started{false};
     request_counters _req_counters;
     request_latency_counters _latency_counters;
 };

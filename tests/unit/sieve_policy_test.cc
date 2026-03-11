@@ -16,6 +16,12 @@ using set = absl::flat_hash_set<seastar::sstring>;
 using vector = std::vector<seastar::sstring>;
 map map_;
 
+inline uint64_t now_s() {
+    using namespace std::chrono;
+    return duration_cast<seconds>(steady_clock::now().time_since_epoch())
+        .count();
+}
+
 SievePolicy init(uint32_t budget) {
     map_.clear();
     map_.reserve(100);
@@ -117,13 +123,13 @@ SEASTAR_TEST_CASE(sieve_policy_eviction_lower_budget) {
     // Create entry
     createEntry(20, policy);
     // trigger evict once because algo protects keys for first run
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 0);
     // Trigger hit for first 15 keys
     set hit_keys = hitEntry(1, 15, policy);
     BOOST_REQUIRE_EQUAL(hit_keys.size(), 15);
     // Trigger eviction
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 3);
     for (auto &victim : victim_list) {
         BOOST_REQUIRE(!hit_keys.contains(victim));
@@ -153,13 +159,13 @@ SEASTAR_TEST_CASE(sieve_policy_eviction_higher_budget) {
     // Create entry
     createEntry(20, policy);
     // trigger evict once because algo protects keys for first run
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 0);
     // Trigger hit for first 15 keys
     set hit_keys = hitEntry(1, 15, policy);
     BOOST_REQUIRE_EQUAL(hit_keys.size(), 15);
     // Trigger eviction
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 5);
     for (auto &victim : victim_list) {
         BOOST_REQUIRE(!hit_keys.contains(victim));
@@ -187,7 +193,7 @@ SEASTAR_TEST_CASE(sieve_policy_no_entry) {
     SievePolicy policy = init(10);
 
     vector victim_list;
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 0);
 }
 
@@ -212,13 +218,13 @@ SEASTAR_TEST_CASE(sieve_policy_no_entry) {
 SEASTAR_TEST_CASE(sieve_policy_eviction_with_keys_deletion_scenario_I) {
     SievePolicy policy = init(20);
     createEntry(20, policy);
-    vector victim_list = co_await policy.evict();
+    vector victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 0);
     set hit_keys = hitEntry(1, 10, policy);
     BOOST_REQUIRE_EQUAL(hit_keys.size(), 10);
     set erased_keys = eraseEntry(1, 5, policy);
     BOOST_REQUIRE_EQUAL(erased_keys.size(), 5);
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 10);
     for (const auto &victim : victim_list) {
         BOOST_REQUIRE(!erased_keys.contains(victim));
@@ -245,13 +251,13 @@ SEASTAR_TEST_CASE(sieve_policy_eviction_with_keys_deletion_scenario_I) {
 SEASTAR_TEST_CASE(sieve_policy_no_eviction) {
     SievePolicy policy = init(20);
     createEntry(20, policy);
-    vector victim_list = co_await policy.evict();
+    vector victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 0);
     set hit_keys = hitEntry(1, 20, policy);
     BOOST_REQUIRE_EQUAL(hit_keys.size(), 20);
     set erased_keys = eraseEntry(1, 5, policy);
     BOOST_REQUIRE_EQUAL(erased_keys.size(), 5);
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 0);
 }
 
@@ -274,13 +280,13 @@ SEASTAR_TEST_CASE(sieve_policy_no_eviction) {
 SEASTAR_TEST_CASE(sieve_policy_with_keys_deletion_scenario_II) {
     SievePolicy policy = init(20);
     createEntry(20, policy);
-    vector victim_list = co_await policy.evict();
+    vector victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 0);
     set hit_keys = hitEntry(11, 20, policy);
     BOOST_REQUIRE_EQUAL(hit_keys.size(), 10);
     set erased_keys = eraseEntry(1, 5, policy);
     BOOST_REQUIRE_EQUAL(erased_keys.size(), 5);
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 5);
     for (const auto &victim : victim_list) {
         BOOST_REQUIRE(!erased_keys.contains(victim));
@@ -316,7 +322,7 @@ SEASTAR_TEST_CASE(sieve_policy_hand_wrap_around) {
     createEntry(10, policy);
 
     // 2. Initial eviction clears the visited bits on the first pass.
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
     BOOST_REQUIRE_EQUAL(victim_list.size(), 0);
 
     // 3. Protect the last 5 original keys.
@@ -329,7 +335,7 @@ SEASTAR_TEST_CASE(sieve_policy_hand_wrap_around) {
     // 5. Evict with a budget of 5
     // The hand must traverse the protected keys and find the unprotected old
     // entries first.
-    victim_list = co_await policy.evict();
+    victim_list = co_await policy.evict(now_s());
 
     // The expected victims are the old unprotected keys 1-5.
     BOOST_REQUIRE_EQUAL(victim_list.size(), 5);

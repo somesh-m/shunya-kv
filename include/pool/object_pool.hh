@@ -2,6 +2,7 @@
 #include "eviction/sieve_policy.hh"
 #include "pool/pool.hh"
 #include <cstddef>
+#include <dbconfig.hh>
 #include <memory>
 #include <seastar/core/circular_buffer.hh>
 #include <seastar/core/coroutine.hh>
@@ -19,13 +20,17 @@ class CacheEntryPool {
     explicit CacheEntryPool(std::size_t max_size) : max_size_(max_size) {}
 
     seastar::future<>
-    init(std::size_t usable_memory = 0,
-         double pool_max_memory_percent = 0.6) { // call this after construction
+    init(const db_config &cfg) { // call this after construction
         if (initialized_) {
             co_return;
         }
-        usable_memory_ = usable_memory;
-        pool_max_memory_percent_ = pool_max_memory_percent;
+        cfg_ = cfg;
+        value_offset_ = cfg.pool.page_size_goal + cfg.pool.key_reserve;
+        auto stats = seastar::memory::stats();
+        // Keeping 15 percent reserved for seastar overhead
+        usable_memory_ =
+            (1 - cfg_.pool.memory_reserve_percentage) * stats.total_memory();
+        pool_max_memory_percent_ = cfg_.pool.pool_max_memory_percent;
 
         if (max_size_ == 0) {
             max_size_ = calculate_optimal_pool_size();
@@ -68,4 +73,5 @@ class CacheEntryPool {
     bool initialized_ = false;
     std::shared_ptr<SievePolicy> policy_;
     seastar::future<> prepopulate_pool();
+    db_config cfg_;
 };
