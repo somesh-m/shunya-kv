@@ -1,0 +1,40 @@
+// eviction/sieve_policy.hh
+#pragma once
+#include "eviction/eviction_config.hh"
+#include "ttl/entry.hh"
+#include <boost/intrusive/list.hpp>
+#include <seastar/coroutine/maybe_yield.hh>
+
+namespace bi = boost::intrusive;
+
+using SieveList =
+    bi::list<ttl::Entry,
+             bi::member_hook<ttl::Entry, decltype(ttl::Entry::list_hook),
+                             &ttl::Entry::list_hook>>;
+
+class SievePolicy {
+  public:
+    explicit SievePolicy(eviction::EvictionConfig cfg) : evCfg_(cfg) {
+        hand_ = sieveList_.end();
+    }
+
+    void on_insert(ttl::Entry &e);
+    void on_erase(ttl::Entry &e);
+    void on_hit(ttl::Entry &e);
+
+    seastar::future<std::vector<seastar::sstring>> evict(uint64_t now);
+
+    void set_eviction_type(eviction::EvictionType type) {
+        evictParams =
+            type == eviction::EvictionType::soft ? evCfg_.soft_ : evCfg_.hard_;
+    }
+
+    std::size_t size() const noexcept;
+    bool empty() const noexcept;
+
+  private:
+    SieveList sieveList_;
+    SieveList::iterator hand_;
+    eviction::EvictionConfig evCfg_;
+    eviction::EvictConfig evictParams = evCfg_.hard_;
+};

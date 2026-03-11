@@ -30,6 +30,47 @@ static inline bool parse_bool(std::string_view v, bool &out) {
     return false;
 }
 
+static inline std::string_view maybe_unquote(std::string_view v) {
+    if (v.size() >= 2 && v.front() == '"' && v.back() == '"') {
+        return v.substr(1, v.size() - 2);
+    }
+    return v;
+}
+
+static inline bool parse_u64(std::string_view v, uint64_t &out) {
+    uint64_t parsed = 0;
+    const auto [ptr, ec] =
+        std::from_chars(v.data(), v.data() + v.size(), parsed);
+    if (ec == std::errc{} && ptr == v.data() + v.size()) {
+        out = parsed;
+        return true;
+    }
+    return false;
+}
+
+static inline bool parse_double(std::string_view v, double &out) {
+    try {
+        std::string s(v);
+        size_t idx = 0;
+        const double parsed = std::stod(s, &idx);
+        if (idx == s.size()) {
+            out = parsed;
+            return true;
+        }
+    } catch (...) {
+    }
+    return false;
+}
+
+static inline bool parse_policy(std::string_view v,
+                                eviction::EvictionPolicy &out) {
+    if (v == "sieve" || v == "SIEVE" || v == "Sieve") {
+        out = eviction::EvictionPolicy::Sieve;
+        return true;
+    }
+    return false;
+}
+
 void load_config_file(db_config &cfg, const char *path) {
     namespace fs = std::filesystem;
 
@@ -81,6 +122,7 @@ void load_config_file(db_config &cfg, const char *path) {
         if (value.empty()) {
             continue;
         }
+        value = maybe_unquote(value);
 
         if (key == "db_port" || key == "base_port" || key == "port") {
             unsigned parsed = 0;
@@ -92,10 +134,65 @@ void load_config_file(db_config &cfg, const char *path) {
             }
         } else if (key == "hash") {
             cfg.hash = seastar::sstring(value.data(), value.size());
+        } else if (key == "policy") {
+            eviction::EvictionPolicy parsed{};
+            if (parse_policy(value, parsed)) {
+                cfg.ev_config.policy = parsed;
+            }
+        } else if (key == "soft_stop") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.ev_config.soft_.stop = parsed;
+            }
+        } else if (key == "soft_budget") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.ev_config.soft_.budget = parsed;
+            }
+        } else if (key == "soft_throttle") {
+            bool parsed = false;
+            if (parse_bool(value, parsed)) {
+                cfg.ev_config.soft_.throttle = parsed;
+            }
+        } else if (key == "hard_stop") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.ev_config.hard_.stop = parsed;
+            }
+        } else if (key == "hard_budget") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.ev_config.hard_.budget = parsed;
+            }
+        } else if (key == "hard_throttle") {
+            bool parsed = false;
+            if (parse_bool(value, parsed)) {
+                cfg.ev_config.hard_.throttle = parsed;
+            }
         } else if (key == "send_shard_details_on_connect") {
             bool parsed = false;
             if (parse_bool(value, parsed)) {
                 cfg.send_shard_details_on_connect = parsed;
+            }
+        } else if (key == "memory_reserve_percentage") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.pool.memory_reserve_percentage = parsed;
+            }
+        } else if (key == "pool_max_memory_percent") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.pool.pool_max_memory_percent = parsed;
+            }
+        } else if (key == "page_size_goal") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.pool.page_size_goal = static_cast<std::size_t>(parsed);
+            }
+        } else if (key == "key_reserve") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.pool.key_reserve = static_cast<std::size_t>(parsed);
             }
         }
     }

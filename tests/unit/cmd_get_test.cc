@@ -96,7 +96,7 @@ SEASTAR_TEST_CASE(GET_TEST_SHARD_HOPPING) {
     }
     BOOST_REQUIRE(!key.empty());
     const resp::ArgvView cmd{"get", key};
-    perform_local_set(key, value);
+    co_await perform_local_set(key, value);
 
     auto o = make_out();
     co_await handle_get(cmd, o.out, local_service());
@@ -106,19 +106,20 @@ SEASTAR_TEST_CASE(GET_TEST_SHARD_HOPPING) {
 }
 
 SEASTAR_TEST_CASE(GET_TEST_OVERWRITE_EXISTING) {
-    std::string key = "name";
-    std::string value_a = "test_a";
-    std::string value_b = "test_b";
+    std::string key = "name_overwrite_test";
+    std::string value_a = "test_ab";
+    std::string value_b = "test_bc";
     const resp ::ArgvView cmd{"get", key};
-    perform_local_set(key, value_a);
+    co_await perform_local_set(key, value_a);
     auto o = make_out();
     co_await handle_get(cmd, o.out, local_service());
     co_await o.out.close();
     std::string reply = bufs_to_sstring(o.bufs);
+    BOOST_TEST_MESSAGE("GET_TEST_OVERWRITE_EXISTING first reply: " << reply);
     BOOST_REQUIRE_EQUAL(reply, get_resp_eq(value_a));
 
     // overwrite the key
-    perform_local_set(key, value_b);
+    co_await perform_local_set(key, value_b);
     auto o1 = make_out();
     co_await handle_get(cmd, o1.out, local_service());
     co_await o1.out.close();

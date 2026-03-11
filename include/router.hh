@@ -1,8 +1,10 @@
 #pragma once
+#include "dbconfig.hh"
 #include "kv_store.hh"
 #include "router_metrics.hh"
 
 #include "hotpath_metrics.hh"
+#include "shard_stats.hh"
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -18,11 +20,11 @@ namespace shunyakv {
 
 class service {
   public:
-    future<> start();
+    future<> start(const db_config &cfg);
     future<> stop();
     future<bool> local_set(std::string_view, sstring);
     future<bool> local_set(std::string_view, sstring, uint64_t);
-    future<std::optional<sstring>> local_get(std::string_view) const;
+    future<std::optional<sstring>> local_get(std::string_view);
     void record_get(bool) noexcept;
     void record_set(bool) noexcept;
     void record_get_latency(uint64_t) noexcept;
@@ -30,9 +32,13 @@ class service {
     void record_cache_miss() noexcept;
     request_counters snapshot_request_counters() const noexcept;
     request_latency_counters snapshot_request_latency_counters() const noexcept;
+    shard_stats_snapshot snapshot_shard_stats() const noexcept;
 
   private:
+    future<> ensure_started();
+
     store _store;
+    bool _started{false};
     request_counters _req_counters;
     request_latency_counters _latency_counters;
 };

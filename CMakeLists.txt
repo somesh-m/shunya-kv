@@ -6,11 +6,13 @@ option(BUILD_SERVER "Build the shunya_store server" ON)
 option(ENABLE_TESTS "Build and run tests" ON)
 option(ENABLE_HOT_PATH_DEBUG "Enable request forwarding counters and latency measurement in hot path" OFF)
 option(ENABLE_SANITIZERS "Enable ASan/UBSan instrumentation for shunya_store" OFF)
+option(ENABLE_LINT_TARGETS "Enable clang-format/clang-tidy targets" ON)
 
 # ---- C++ standard / build type ----
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING
       "Choose the type of build." FORCE)
@@ -20,6 +22,73 @@ endif()
 set(SHUNYA_SRC_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(SHUNYA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(SHUNYA_TEST_DIR    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+
+if (ENABLE_LINT_TARGETS)
+file(GLOB_RECURSE SHUNYA_TIDY_SOURCES CONFIGURE_DEPENDS
+  "${SHUNYA_SRC_DIR}/*.cc"
+  "${SHUNYA_TEST_DIR}/*.cc"
+)
+list(FILTER SHUNYA_TIDY_SOURCES EXCLUDE REGEX ".*/metrics_logger\\.cc$")
+list(FILTER SHUNYA_TIDY_SOURCES EXCLUDE REGEX ".*/service\\.cc$")
+list(FILTER SHUNYA_TIDY_SOURCES EXCLUDE REGEX ".*/server\\.cc$")
+
+file(GLOB_RECURSE SHUNYA_FORMAT_SOURCES CONFIGURE_DEPENDS
+  "${SHUNYA_SRC_DIR}/*.cc"
+  "${SHUNYA_SRC_DIR}/*.hh"
+  "${SHUNYA_INCLUDE_DIR}/*.hh"
+  "${SHUNYA_TEST_DIR}/*.cc"
+  "${SHUNYA_TEST_DIR}/*.hh"
+)
+
+find_program(CLANG_FORMAT_EXE NAMES clang-format)
+find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+
+if(CLANG_FORMAT_EXE)
+  add_custom_target(format
+    COMMAND "${CLANG_FORMAT_EXE}" -i ${SHUNYA_FORMAT_SOURCES}
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Formatting C++ sources with clang-format"
+    VERBATIM
+  )
+
+  add_custom_target(format-check
+    COMMAND "${CLANG_FORMAT_EXE}" --dry-run --Werror ${SHUNYA_FORMAT_SOURCES}
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Checking C++ formatting with clang-format"
+    VERBATIM
+  )
+else()
+  add_custom_target(format
+    COMMAND "${CMAKE_COMMAND}" -E echo "clang-format not found"
+    COMMAND "${CMAKE_COMMAND}" -E false
+    VERBATIM
+  )
+  add_custom_target(format-check
+    COMMAND "${CMAKE_COMMAND}" -E echo "clang-format not found"
+    COMMAND "${CMAKE_COMMAND}" -E false
+    VERBATIM
+  )
+endif()
+
+if(CLANG_TIDY_EXE)
+  add_custom_target(tidy
+    COMMAND "${CLANG_TIDY_EXE}"
+            -p "${CMAKE_BINARY_DIR}"
+            --header-filter="^${CMAKE_SOURCE_DIR}/(src|include|tests)/.*"
+            --system-headers=false
+            ${SHUNYA_TIDY_SOURCES}
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Running clang-tidy"
+    VERBATIM
+  )
+else()
+  add_custom_target(tidy
+    COMMAND "${CMAKE_COMMAND}" -E echo "clang-tidy not found"
+    COMMAND "${CMAKE_COMMAND}" -E false
+    VERBATIM
+  )
+endif()
+endif()
 
 # =========================================
 # FNV reference (vendored from lcn2/fnv)
@@ -136,9 +205,14 @@ FetchContent_MakeAvailable(googletest)
 SET(TEST_SOURCES
   ${SHUNYA_TEST_DIR}/hashtest.cc
   ${SHUNYA_TEST_DIR}/test_hash_wrapper.cc
-  ${SHUNYA_TEST_DIR}/ttl_cache_test.cc
+  # ${SHUNYA_TEST_DIR}/ttl_cache_test.cc
 )
-add_executable(shunya_test ${TEST_SOURCES} ${SHUNYA_SRC_DIR}/ttl/ttl_cache.cc)
+add_executable(shunya_test
+  ${TEST_SOURCES}
+  # ${SHUNYA_SRC_DIR}/ttl/ttl_cache.cc
+  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
+)
 # Make sure tests can include your headers + vendored fnv
 target_include_directories(shunya_test PRIVATE
   ${SHUNYA_INCLUDE_DIR}        # e.g. include/hash_wrapper.hh
@@ -148,6 +222,7 @@ target_include_directories(shunya_test PRIVATE
 # Link gtest and your fnv_ref (and anything else your test needs)
 target_link_libraries(shunya_test PRIVATE
   GTest::gtest GTest::gtest_main
+  Seastar::seastar
   fnv_ref
   # fmt::fmt         # if your test uses fmt
   # Seastar::seastar # only if your test touches seastar

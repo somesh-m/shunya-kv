@@ -46,8 +46,8 @@ PipelinedSocketHandler::try_extract_request(seastar::sstring &buf) {
     return shunyakv::ParsedRequest{std::move(req), {}};
 }
 
-seastar::future<> PipelinedSocketHandler::read_loop(shunyakv::connection &c) {
-    auto &in = c.in();
+seastar::future<>
+PipelinedSocketHandler::read_loop_impl(seastar::input_stream<char> &in) {
     seastar::sstring buffer;
 
     try {
@@ -83,9 +83,13 @@ seastar::future<> PipelinedSocketHandler::read_loop(shunyakv::connection &c) {
     _cv.signal();
 }
 
-seastar::future<> PipelinedSocketHandler::write_loop(shunyakv::connection &c) {
-    auto &out = c.out();
+seastar::future<> PipelinedSocketHandler::read_loop(shunyakv::connection &c) {
+    auto &in = c.in();
+    return read_loop_impl(in);
+}
 
+seastar::future<>
+PipelinedSocketHandler::write_loop_impl(seastar::output_stream<char> &out) {
     try {
         while (true) {
             while (_respq.empty()) {
@@ -127,6 +131,13 @@ seastar::future<> PipelinedSocketHandler::write_loop(shunyakv::connection &c) {
         _slots.signal(max_inflight);
         co_return;
     }
+}
+seastar::future<> PipelinedSocketHandler::write_loop(shunyakv::connection &c) {
+    auto &out = c.out();
+    /**
+     * write_loop_impl is unit testable as it has no dependency on connection
+     */
+    return write_loop_impl(out);
 }
 
 seastar::future<> PipelinedSocketHandler::process(shunyakv::connection &c) {

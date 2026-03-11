@@ -10,7 +10,7 @@ seastar::future<> handle_node_info(const resp::ArgvView &cmd,
 struct node_cfg {
     uint16_t base_port{60110};
     unsigned smp{1};
-    unsigned port_offset{1};
+    unsigned port_offset{0};
     seastar::sstring hash{"fnv1a435345"};
     uint64_t epoch{1};
     bool isPreHashed{false};
