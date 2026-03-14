@@ -433,6 +433,7 @@ add_executable(socket_handler_unit_test
   ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
   ${SHUNYA_SRC_DIR}/cmd_node_info.cc
   ${SHUNYA_SRC_DIR}/node_info_helpers.cc
+  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 
