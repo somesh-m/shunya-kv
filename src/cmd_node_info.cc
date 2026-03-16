@@ -40,21 +40,21 @@ seastar::future<> handle_node_info(const resp::ArgvView &cmd,
         co_return;
     }
     bool want_ranges = false;
-    if (ieq(cmd[1], "RANGES") || ieq(cmd[1], "MAP")) {
-        want_ranges = true;
-    }
     seastar::sstring json;
-    if (want_ranges) {
+    if (cmd.size() == 2 && (ieq(cmd[1], "RANGES") || ieq(cmd[1], "MAP"))) {
         json = compute_hash_ranges();
-    } else {
-        uint16_t shard_no = static_cast<uint16_t>(seastar::this_shard_id());
-        if (cmd.size() == 2) {
-            shard_no = parse_u16(cmd[1]);
-        }
-        json = compute_hash(static_cast<uint16_t>(shard_no));
+        co_await resp::write_bulk(out, json);
+        co_return;
     }
-
-    // Reply as RESP bulk string
+    if (cmd.size() == 2 && ieq(cmd[1], "SHARDS")) {
+        co_await resp::write_bulk(out, get_smp_count());
+        co_return;
+    }
+    uint16_t shard_no = static_cast<uint16_t>(seastar::this_shard_id());
+    if (cmd.size() == 2) {
+        shard_no = parse_u16(cmd[1]);
+    }
+    json = compute_hash(static_cast<uint16_t>(shard_no));
     co_await resp::write_bulk(out, json);
     co_return;
 }

@@ -127,4 +127,6 @@ uint16_t parse_u16(const std::string_view &s) {
     return static_cast<uint16_t>(out);
 }
 
+std::string get_smp_count() { return std::to_string(g_node_cfg.smp); }
+
 } // namespace shunyakv
