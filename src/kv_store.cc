@@ -166,31 +166,35 @@ seastar::future<bool> store::set_with_ttl(std::string_view key_view,
     // pq_.push(ttl::HeapNode{.key = std::string_view(it->second->key),
     //                        .expires_at = it->second->expires_at,
     //                        .ver = it->second->ver});
-    // const auto heap_us = std::chrono::duration_cast<std::chrono::microseconds>(
+    // const auto heap_us =
+    // std::chrono::duration_cast<std::chrono::microseconds>(
     //                          std::chrono::steady_clock::now() - heap_start)
     //                          .count();
 
     // const auto sieve_start = std::chrono::steady_clock::now();
     sieve_policy_->on_insert(*it->second.get());
-    // const auto sieve_us = std::chrono::duration_cast<std::chrono::microseconds>(
+    // const auto sieve_us =
+    // std::chrono::duration_cast<std::chrono::microseconds>(
     //                           std::chrono::steady_clock::now() - sieve_start)
     //                           .count();
 
     // const auto evict_start = std::chrono::steady_clock::now();
     co_await check_memory_and_evict();
-    // const auto evict_us = std::chrono::duration_cast<std::chrono::microseconds>(
+    // const auto evict_us =
+    // std::chrono::duration_cast<std::chrono::microseconds>(
     //                           std::chrono::steady_clock::now() - evict_start)
     //                           .count();
-    // const auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(
+    // const auto total_us =
+    // std::chrono::duration_cast<std::chrono::microseconds>(
     //                           std::chrono::steady_clock::now() - op_start)
     //                           .count();
     // if (total_us >= 1000) {
     //     kv_store_log.warn(
     //         "slow set_with_ttl on shard {} key='{}' total={}us acquire={}us "
-    //         "map={}us heap={}us sieve={}us evict={}us inserted={} map_size={} "
-    //         "pq_size={}",
-    //         seastar::this_shard_id(), key_view, total_us, acquire_us, map_us,
-    //         heap_us, sieve_us, evict_us, inserted, _map.size(), pq_.size());
+    //         "map={}us heap={}us sieve={}us evict={}us inserted={} map_size={}
+    //         " "pq_size={}", seastar::this_shard_id(), key_view, total_us,
+    //         acquire_us, map_us, heap_us, sieve_us, evict_us, inserted,
+    //         _map.size(), pq_.size());
     // }
     co_return true;
 }
@@ -236,22 +240,16 @@ seastar::future<> store::check_memory_and_evict() {
     size_t limit = usable_memory_;
 
     // 2. Calculate percentage
-    double total_memory_usage_fraction =
-        static_cast<double>(currently_used) / limit;
     double pool_usage_fraction =
         entry_pool_.get_used_slots() / entry_pool_.get_total_slots();
 
     // 3. Trigger eviction if over threshold (e.g., 80%)
-    const double hard_trigger = ev_cfg_.hard_.trigger;
     const double soft_trigger = ev_cfg_.soft_.trigger;
     eviction::EvictConfig config;
     eviction::EvictionType type;
     // soft eviction applies on pool and hard trigger on total memory
-    if (total_memory_usage_fraction >= hard_trigger ||
-        pool_usage_fraction >= soft_trigger) {
-        type = total_memory_usage_fraction >= hard_trigger
-                   ? eviction::EvictionType::hard
-                   : eviction::EvictionType::soft;
+    if (pool_usage_fraction >= soft_trigger) {
+        type = eviction::EvictionType::soft;
         sieve_policy_->set_eviction_type(type);
         HOTPATHLOGS(
             kv_store_log.info("Starting {} eviction\n Usage fraction {}",
