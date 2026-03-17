@@ -30,6 +30,7 @@ class service {
     void record_get_latency(uint64_t) noexcept;
     void record_set_latency(uint64_t) noexcept;
     void record_cache_miss() noexcept;
+    void record_cache_miss_count(std::size_t n = 1) noexcept;
     request_counters snapshot_request_counters() const noexcept;
     request_latency_counters snapshot_request_latency_counters() const noexcept;
     shard_stats_snapshot snapshot_shard_stats() const noexcept;

@@ -68,7 +68,8 @@ seastar::future<> handle_get(const resp::ArgvView &cmd,
         // (or if you change service to return sstring, you can avoid this copy)
     } else {
         // RESP null bulk for misses (redis-cli expects this)
-        HOTPATHCOUNT(store.record_cache_miss());
+        // HOTPATHCOUNT(store.record_cache_miss());
+        // store.record_cache_miss_count();
         HOTPATHLOGS(get_logger.info("Cannot find key = {} ", key));
         co_await resp::write_null(out);
     }

@@ -27,7 +27,7 @@ std::size_t CacheEntryPool::get_used_slots() const {
 
 seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
     if (pool_.empty()) {
-        pool_logger().info("Bucket empty, generating new object");
+        // pool_logger().info("Bucket empty, generating new object");
         auto entry = std::make_unique<ttl::Entry>();
         entry->value.reserve(value_offset_);
         entry->in_use_ = true;

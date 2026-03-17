@@ -41,6 +41,9 @@ class store {
     future<bool> set_with_ttl(std::string_view key, sstring value,
                               uint64_t ttl);
     shard_stats_snapshot snapshot_stats() const noexcept;
+    void record_cache_miss_count(std::size_t n = 1) noexcept {
+        stats_.record_cache_miss_count(n);
+    }
 
     /**
      * Perform TTL eviction
