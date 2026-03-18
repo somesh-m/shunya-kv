@@ -10,15 +10,15 @@ struct db_config {
         .policy = eviction::EvictionPolicy::Sieve,
         .soft_ =
             {
-                .trigger = 0.6,
-                .stop = 0.6,
-                .budget = 1000,
+                .trigger = 0.8,
+                .stop = 0.7,
+                .budget = 2000,
                 .throttle = false,
             },
         .hard_ =
             {
-                .trigger = 0.8,
-                .stop = 0.7,
+                .trigger = 0.95,
+                .stop = 0.75,
                 .budget = 3000,
                 .throttle = true,
             },
