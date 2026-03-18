@@ -39,14 +39,28 @@ std::size_t CacheEntryPool::get_used_slots() const {
     return max_size_ - pool_.size();
 }
 std::size_t CacheEntryPool::get_available_prob_slots() const {
-    return prob_pool_.size();
+    return prob_pool_max_size_ - prob_count_;
 }
 std::size_t CacheEntryPool::get_total_prob_slots() const {
     return prob_pool_max_size_;
 }
 
-std::size_t CacheEntryPool::get_used_prob_slots() const {
-    return prob_pool_max_size_ - prob_pool_.size();
+std::size_t CacheEntryPool::get_used_prob_slots() const { return prob_count_; }
+
+void CacheEntryPool::run_sequential_reaper() {
+    /**
+     * This function runs the sequential reaper
+     * It removes entry from the current hand till upto reaper_budget_ entries
+     */
+}
+
+void promote_to_sanctuary(std::unique_ptr<ttl::Entry> entry) {
+    /**
+     * This function takes an entry and does:
+     * change the type to sanctuary
+     * update the intrusive hooks
+     * update the counters
+     */
 }
 
 seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
@@ -55,60 +69,36 @@ seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
         auto entry = std::make_unique<ttl::Entry>();
         entry->value.reserve(value_offset_);
         entry->in_use_ = true;
+        entry->pool_type = ttl::PoolType::Probation;
+        prob_count_++;
+
+        // TODO: Check if there is a way to run this but not block the return.
+        // Kind of like run on next tick
+        run_sequential_reaper();
         co_return entry;
     }
 
+    if (prob_count_ >= prob_threshold_) {
+        run_sequential_reaper();
+    }
     auto entry = std::move(pool_.front());
     pool_.pop_front();
     entry->in_use_ = true;
+    entry->pool_type = ttl::PoolType::Probation;
+    prob_count_++;
     co_return entry;
-}
-
-seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire_prob() {
-    if (prob_pool_.empty()) {
-        // pool_logger().info("Bucket empty, generating new object");
-        auto entry = std::make_unique<ttl::Entry>();
-        entry->value.reserve(value_offset_);
-        entry->in_use_ = true;
-        co_return entry;
-    }
-
-    auto entry = std::move(prob_pool_.front());
-    prob_pool_.pop_front();
-    entry->in_use_ = true;
-    co_return entry;
-}
-
-void CacheEntryPool::release_prob(std::unique_ptr<ttl::Entry> entry) {
-    if (!entry) {
-        return;
-    }
-
-    entry->in_use_ = false;
-    entry->visited = false;
-    entry->value.clear();
-    entry->key = "";
-    entry->expires_at = 0;
-    entry->ver = 0;
-    entry->heat = 0;
-    entry->last_access = 0;
-
-    if (entry->value.capacity() > value_offset_ * 2) {
-        std::string tmp;
-        tmp.reserve(value_offset_);
-        entry->value.swap(tmp);
-    }
-
-    if (prob_pool_.size() < prob_pool_max_size_) {
-        prob_pool_.push_back(std::move(entry));
-        return;
-    }
-    entry.reset();
+    // TODO:Handle the probationary hook
 }
 
 void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
     if (!entry) {
         return;
+    }
+
+    if (entry->pool_type == ttl::PoolType::Probation) {
+        prob_count_--;
+    } else {
+        sanc_count_--;
     }
 
     entry->in_use_ = false;
