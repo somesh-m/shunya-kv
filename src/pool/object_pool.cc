@@ -3,7 +3,9 @@
 #include <seastar/core/coroutine.hh>
 
 seastar::future<> CacheEntryPool::prepopulate_pool() {
+    prob_pool_.reserve(prob_pool_max_size_);
     pool_.reserve(max_size_);
+    // Populate the full time pool
     for (std::size_t i = 0; i < max_size_; i++) {
         auto entry = std::make_unique<ttl::Entry>();
         entry->value.reserve(value_offset_);
@@ -12,10 +14,22 @@ seastar::future<> CacheEntryPool::prepopulate_pool() {
             co_await seastar::coroutine::maybe_yield();
         }
     }
+    // Populate the probationary pool
+    for (std::size_t i = 0; i < prob_pool_max_size_; i++) {
+        auto entry = std::make_unique<ttl::Entry>();
+        entry->value.reserve(value_offset_);
+        prob_pool_.push_back(std::move(entry));
+        if (i % 500 == 0) {
+            co_await seastar::coroutine::maybe_yield();
+        }
+    }
     // Record the free mem which is supposed to be the baseline for on
     auto stats = seastar::memory::stats();
     free_after_pool_ = stats.free_memory();
-    pool_logger().info("Pool size {} ", pool_.size());
+    pool_logger().info("Shard Id: {}; Pool size: {} ", seastar::this_shard_id(),
+                       pool_.size());
+    pool_logger().info("Shard Id: {}; Probationary Pool size: {} ",
+                       seastar::this_shard_id(), prob_pool_.size());
     co_return;
 }
 
@@ -23,6 +37,16 @@ std::size_t CacheEntryPool::get_available_slots() const { return pool_.size(); }
 std::size_t CacheEntryPool::get_total_slots() const { return max_size_; }
 std::size_t CacheEntryPool::get_used_slots() const {
     return max_size_ - pool_.size();
+}
+std::size_t CacheEntryPool::get_available_prob_slots() const {
+    return prob_pool_.size();
+}
+std::size_t CacheEntryPool::get_total_prob_slots() const {
+    return prob_pool_max_size_;
+}
+
+std::size_t CacheEntryPool::get_used_prob_slots() const {
+    return prob_pool_max_size_ - prob_pool_.size();
 }
 
 seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
@@ -38,6 +62,48 @@ seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
     pool_.pop_front();
     entry->in_use_ = true;
     co_return entry;
+}
+
+seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire_prob() {
+    if (prob_pool_.empty()) {
+        // pool_logger().info("Bucket empty, generating new object");
+        auto entry = std::make_unique<ttl::Entry>();
+        entry->value.reserve(value_offset_);
+        entry->in_use_ = true;
+        co_return entry;
+    }
+
+    auto entry = std::move(prob_pool_.front());
+    prob_pool_.pop_front();
+    entry->in_use_ = true;
+    co_return entry;
+}
+
+void CacheEntryPool::release_prob(std::unique_ptr<ttl::Entry> entry) {
+    if (!entry) {
+        return;
+    }
+
+    entry->in_use_ = false;
+    entry->visited = false;
+    entry->value.clear();
+    entry->key = "";
+    entry->expires_at = 0;
+    entry->ver = 0;
+    entry->heat = 0;
+    entry->last_access = 0;
+
+    if (entry->value.capacity() > value_offset_ * 2) {
+        std::string tmp;
+        tmp.reserve(value_offset_);
+        entry->value.swap(tmp);
+    }
+
+    if (prob_pool_.size() < prob_pool_max_size_) {
+        prob_pool_.push_back(std::move(entry));
+        return;
+    }
+    entry.reset();
 }
 
 void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
