@@ -62,12 +62,29 @@ seastar::future<> store::start(unsigned, const db_config &cfg) {
                       cfg.pool.memory_reserve_percentage, usable_memory_);
     _map.reserve(27000'00);
 
-    co_await entry_pool_.init(cfg);
     ev_cfg_ = cfg.ev_config;
     if (!sieve_policy_.has_value()) {
         sieve_policy_.emplace(ev_cfg_);
     }
 
+    co_await entry_pool_.init(cfg, sieve_policy_);
+    entry_pool_.set_sequential_eviction_callback(
+        [this](const std::vector<seastar::sstring> victimList)
+            -> seastar::future<> {
+            uint32_t count = 0;
+            for (const auto &key : victimList) {
+                auto node = _map.extract(key);
+                if (!node.empty()) {
+                    entry_pool_.release(std::move(node.mapped()));
+                    stats_.record_eviction();
+                }
+                count++;
+                if (count % 2000 == 0) {
+                    co_await seastar::coroutine::maybe_yield();
+                }
+            }
+            co_return;
+        });
     co_return;
 }
 
@@ -102,10 +119,14 @@ seastar::future<bool> store::set(std::string_view key_view,
         // We keep the version, heat, and access times so the
         // eviction policies (Sieve/PQ) stay consistent.
         it->second->update_from(std::move(*pooled_entry), false);
+        /**
+         * Since the key was already present, promote it to sanctuary
+         */
+        entry_pool_.promote_to_sanctuary(*it->second.get());
 
         entry_pool_.release(std::move(pooled_entry));
     }
-    sieve_policy_->on_insert(*it->second.get());
+    // sieve_policy_->on_insert(*it->second.get());
     co_await check_memory_and_evict();
     co_return true;
 }
@@ -156,6 +177,9 @@ seastar::future<bool> store::set_with_ttl(std::string_view key_view,
          * destroyed, preserving pooling semantics and avoiding allocator churn.
          */
         it->second->update_from(std::move(*pooled_entry), true);
+
+        entry_pool_.promote_to_sanctuary(*it->second.get());
+
         entry_pool_.release(std::move(pooled_entry));
     }
 
@@ -172,7 +196,7 @@ seastar::future<bool> store::set_with_ttl(std::string_view key_view,
     //                          .count();
 
     // const auto sieve_start = std::chrono::steady_clock::now();
-    sieve_policy_->on_insert(*it->second.get());
+    // sieve_policy_->on_insert(*it->second.get());
     // const auto sieve_us =
     // std::chrono::duration_cast<std::chrono::microseconds>(
     //                           std::chrono::steady_clock::now() - sieve_start)
@@ -214,6 +238,7 @@ store::get(std::string_view key) {
         entry_pool_.release(std::move(node.mapped()));
         co_return std::nullopt;
     }
+    entry_pool_.promote_to_sanctuary(*entry_ptr);
     sieve_policy_->on_hit(*entry_ptr);
     co_return std::optional<seastar::sstring>(entry_ptr->value);
 }
@@ -260,8 +285,9 @@ seastar::future<> store::check_memory_and_evict() {
             co_return;
         const auto sieve_victims = co_await sieve_policy_->evict(now_s());
         HOTPATHLOGS(kv_store_log.info("Victim Keys {}", sieve_victims.size()));
+        uint32_t count = 0;
+
         for (const auto &key : sieve_victims) {
-            uint32_t count = 0;
             auto node = _map.extract(key);
             if (!node.empty()) {
                 entry_pool_.release(std::move(node.mapped()));

@@ -1,6 +1,7 @@
 #pragma once
 #include "eviction/sieve_policy.hh"
 #include "pool/pool.hh"
+#include <boost/intrusive/list.hpp>
 #include <cstddef>
 #include <dbconfig.hh>
 #include <memory>
@@ -15,16 +16,28 @@ inline seastar::logger &pool_logger() {
     return logger;
 }
 
+namespace bi = boost::intrusive;
+
+using ProbationList =
+    bi::list<ttl::Entry,
+             bi::member_hook<ttl::Entry,
+                             bi::list_member_hook<bi::link_mode<bi::safe_link>>,
+                             &ttl::Entry::probation_hook>>;
+
 class CacheEntryPool {
   public:
-    explicit CacheEntryPool(std::size_t max_size) : max_size_(max_size) {}
+    explicit CacheEntryPool(std::size_t max_size = 0) : max_size_(max_size) {
+        probation_hand_ = probation_list_.end();
+    }
 
     seastar::future<>
-    init(const db_config &cfg) { // call this after construction
+    init(const db_config &cfg,
+         const SievePolicy sieve_policy) { // call this after construction
         if (initialized_) {
             co_return;
         }
         cfg_ = cfg;
+        sieve_policy_ = sieve_policy;
         value_offset_ = cfg.pool.page_size_goal + cfg.pool.key_reserve;
         auto stats = seastar::memory::stats();
         // Keeping 15 percent reserved for seastar overhead
@@ -68,7 +81,10 @@ class CacheEntryPool {
     seastar::future<std::unique_ptr<ttl::Entry>> acquire();
     void release(std::unique_ptr<ttl::Entry> entry);
     void run_sequential_reaper();
-    void promote_to_sanctuary(std::unique_ptr<ttl::Entry> entry);
+    seastar::future<> promote_to_sanctuary(std::unique_ptr<ttl::Entry> entry);
+    seastar::future<> set_sequential_eviction_callback(EvictionCallback cb) {
+        on_sequential_evict_ = std::move(cb);
+    }
 
     std::size_t calculate_optimal_pool_size() noexcept;
     std::size_t get_available_slots() const;
@@ -96,4 +112,10 @@ class CacheEntryPool {
     std::shared_ptr<SievePolicy> policy_;
     seastar::future<> prepopulate_pool();
     db_config cfg_;
+
+    ProbationList probation_list_;
+
+    // The 'hand' for the SIEVE algorithm inside the Sanctuary
+    ProbationList::iterator probation_hand_;
+    SievePolicy sieve_policy_;
 };

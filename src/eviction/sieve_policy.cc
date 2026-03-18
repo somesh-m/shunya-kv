@@ -9,7 +9,13 @@ inline bool is_expired(uint64_t now, uint64_t expires_at) {
 }
 
 void SievePolicy::on_insert(ttl::Entry &e) {
+    if (e.pool_type == ttl::PoolType::Sanctuary) {
+        // This is already added in the sanctuary
+        // on_insert could be called multiple times
+        return;
+    }
     e.visited = true;
+    e.pool_type = ttl::PoolType::Sanctuary;
 
     if (!e.list_hook.is_linked()) {
         sieveList_.push_back(e);
@@ -42,6 +48,7 @@ void SievePolicy::on_erase(ttl::Entry &e) {
 seastar::future<std::vector<seastar::sstring>>
 SievePolicy::evict(uint64_t now) {
     std::vector<seastar::sstring> victim_list;
+    victim_list.reserve(evictParams.budget);
     if (sieveList_.empty()) {
         co_return victim_list;
     }

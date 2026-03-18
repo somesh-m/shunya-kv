@@ -11,6 +11,7 @@ namespace bi = boost::intrusive;
 
 namespace ttl {
 enum class PoolType { Probation, Sanctuary };
+
 struct Entry {
     std::string value;
 
