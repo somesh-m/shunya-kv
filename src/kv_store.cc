@@ -67,7 +67,7 @@ seastar::future<> store::start(unsigned, const db_config &cfg) {
         sieve_policy_.emplace(ev_cfg_);
     }
 
-    co_await entry_pool_.init(cfg, sieve_policy_);
+    co_await entry_pool_.init(cfg, *sieve_policy_);
     entry_pool_.set_sequential_eviction_callback(
         [this](const std::vector<seastar::sstring> victimList)
             -> seastar::future<> {
@@ -79,7 +79,7 @@ seastar::future<> store::start(unsigned, const db_config &cfg) {
                     stats_.record_eviction();
                 }
                 count++;
-                if (count % 2000 == 0) {
+                if (count % 100 == 0) {
                     co_await seastar::coroutine::maybe_yield();
                 }
             }

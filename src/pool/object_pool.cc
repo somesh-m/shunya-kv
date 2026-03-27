@@ -2,9 +2,7 @@
 #include <memory>
 #include <seastar/core/coroutine.hh>
 
-void remove_from_probation(ttl::Entry &entry);
 seastar::future<> CacheEntryPool::prepopulate_pool() {
-    prob_pool_.reserve(prob_pool_max_size_);
     pool_.reserve(max_size_);
     // Populate the full time pool
     for (std::size_t i = 0; i < max_size_; i++) {
@@ -15,22 +13,12 @@ seastar::future<> CacheEntryPool::prepopulate_pool() {
             co_await seastar::coroutine::maybe_yield();
         }
     }
-    // Populate the probationary pool
-    for (std::size_t i = 0; i < prob_pool_max_size_; i++) {
-        auto entry = std::make_unique<ttl::Entry>();
-        entry->value.reserve(value_offset_);
-        prob_pool_.push_back(std::move(entry));
-        if (i % 500 == 0) {
-            co_await seastar::coroutine::maybe_yield();
-        }
-    }
+
     // Record the free mem which is supposed to be the baseline for on
     auto stats = seastar::memory::stats();
     free_after_pool_ = stats.free_memory();
     pool_logger().info("Shard Id: {}; Pool size: {} ", seastar::this_shard_id(),
                        pool_.size());
-    pool_logger().info("Shard Id: {}; Probationary Pool size: {} ",
-                       seastar::this_shard_id(), prob_pool_.size());
     co_return;
 }
 
@@ -49,59 +37,78 @@ std::size_t CacheEntryPool::get_total_prob_slots() const {
 std::size_t CacheEntryPool::get_used_prob_slots() const { return prob_count_; }
 
 seastar::future<> CacheEntryPool::run_sequential_reaper() {
-    /**
-     * This function runs the sequential reaper
-     * It removes reaper_budget_ county of entry from the probation_hand_
-     * Advances probation_hand_ by reaper_budget_
-     */
     if (probation_list_.empty()) {
-        return;
+        co_return;
     }
+
+    // Reset to a known-good iterator at the start of each run so we don't
+    // carry a stale intrusive-list iterator across unrelated mutations.
+    probation_hand_ = probation_list_.begin();
+
     std::vector<seastar::sstring> victim_list;
     victim_list.reserve(reaper_budget_);
-    if (probation_hand_ == probation_list_.end()) {
-        probation_hand_ = probation_list_.begin();
-    }
 
     std::size_t evicted_count = 0;
-    while (evicted_count < reaper_budget_) {
-        ttl::Entry &cur = *probation_hand_;
-        victim_list.push_back(probation_hand_->key);
-        probation_list_.erase(probation_hand_);
-        if (probation_list_.empty()) {
-            probation_hand_ = probation_list_.end();
-            break;
-        }
-        ++probation_hand_;
-        ++evicted_count;
-        prob_count_--;
+    while (evicted_count < reaper_budget_ && !probation_list_.empty()) {
+        auto victim_it = probation_hand_;
 
-        if (evicted_count % 500 == 0) {
+        // 1. Determine where the 'hand' should move next BEFORE erasing
+        // If we are at the last element, wrap to the beginning.
+        auto next_it = std::next(victim_it);
+        if (next_it == probation_list_.end()) {
+            next_it = probation_list_.begin();
+        }
+
+        // 2. Collect data and erase
+        victim_list.push_back(victim_it->key);
+        probation_list_.erase(victim_it);
+        prob_count_--;
+        evicted_count++;
+
+        // 3. Update the persistent hand
+        // If the list is now empty, point to end(); otherwise, point to our
+        // pre-calculated next element
+        probation_hand_ =
+            probation_list_.empty() ? probation_list_.end() : next_it;
+
+        // 4. Cooperative multitasking yield
+        if (evicted_count % 200 == 0) {
             co_await seastar::coroutine::maybe_yield();
         }
-
-        if (probation_hand_ == probation_list_.end()) {
-            probation_hand_ = probation_list_.begin();
-        }
     }
-    if (on_sequential_evict_) {
+
+    if (on_sequential_evict_ && !victim_list.empty()) {
         co_await on_sequential_evict_(victim_list);
     }
+
+    // pool_logger().info("reaper logger victim list {}", victim_list.size());
+    co_return;
 }
 
-void remove_from_probation(ttl::Entry &entry) {
+void CacheEntryPool::remove_from_probation(ttl::Entry &entry) {
     if (!entry.probation_hook.is_linked()) {
         return;
     }
     auto it = ProbationList::s_iterator_to(entry);
+    auto next_it = std::next(it);
+    if (next_it == probation_list_.end()) {
+        next_it = probation_list_.begin();
+    }
+    const bool removed_hand = (it == probation_hand_);
     probation_list_.erase(it);
 
     if (prob_count_ > 0) {
         prob_count_--;
     }
+
+    if (probation_list_.empty()) {
+        probation_hand_ = probation_list_.end();
+    } else if (removed_hand) {
+        probation_hand_ = next_it;
+    }
 }
 
-void CacheEntryPool::promote_to_sanctuary(std::unique_ptr<ttl::Entry> entry) {
+void CacheEntryPool::promote_to_sanctuary(ttl::Entry &entry) {
     /**
      * This function takes an entry and does:
      * return if the entry is already in sanctuary
@@ -112,9 +119,12 @@ void CacheEntryPool::promote_to_sanctuary(std::unique_ptr<ttl::Entry> entry) {
     if (entry.pool_type == ttl::PoolType::Sanctuary) {
         return;
     }
-    remove_from_probation(*entry.get());
-
-    sieve_policy_.on_insert(*entry.get());
+    remove_from_probation(entry);
+    if (sieve_policy_ != nullptr) {
+        sieve_policy_->on_insert(entry);
+    } else {
+        entry.pool_type = ttl::PoolType::Sanctuary;
+    }
     sanc_count_++;
 }
 
@@ -152,10 +162,13 @@ void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
 
     if (entry->pool_type == ttl::PoolType::Probation) {
         remove_from_probation(*entry.get());
-        prob_count_--;
     } else {
-        sieve_policy_.on_erase(*entry.get());
-        sanc_count_--;
+        if (sieve_policy_ != nullptr) {
+            sieve_policy_->on_erase(*entry.get());
+        }
+        if (sanc_count_ > 0) {
+            sanc_count_--;
+        }
     }
 
     entry->in_use_ = false;

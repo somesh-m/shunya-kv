@@ -8,7 +8,7 @@ struct EvictConfig {
     double trigger;
     double stop;
     uint64_t budget;
-    uint64_t budget_percent = 0; // Used only in case of probation pool
+    double budget_percent = 0; // Used only in case of probation pool
     bool throttle;
 };
 

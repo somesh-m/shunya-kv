@@ -42,7 +42,7 @@ struct Entry {
 
     bool visited = false; // used for sieve eviction
 
-    PoolType pool_type;
+    PoolType pool_type = PoolType::Probation;
 
     // This adds the next/prev pointers directly inside the object
     // This hook is utilized when the object is in the sanctuary

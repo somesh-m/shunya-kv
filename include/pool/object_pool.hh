@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <dbconfig.hh>
 #include <memory>
+#include <optional>
 #include <seastar/core/circular_buffer.hh>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/memory.hh>
@@ -15,6 +16,9 @@ inline seastar::logger &pool_logger() {
     static seastar::logger logger{"object_pool"};
     return logger;
 }
+
+using EvictionCallback =
+    std::function<seastar::future<>(std::vector<seastar::sstring>)>;
 
 namespace bi = boost::intrusive;
 
@@ -32,12 +36,12 @@ class CacheEntryPool {
 
     seastar::future<>
     init(const db_config &cfg,
-         const SievePolicy sieve_policy) { // call this after construction
+         SievePolicy &sieve_policy) { // call this after construction
         if (initialized_) {
             co_return;
         }
         cfg_ = cfg;
-        sieve_policy_ = sieve_policy;
+        sieve_policy_ = &sieve_policy;
         value_offset_ = cfg.pool.page_size_goal + cfg.pool.key_reserve;
         auto stats = seastar::memory::stats();
         // Keeping 15 percent reserved for seastar overhead
@@ -53,6 +57,10 @@ class CacheEntryPool {
                 cfg_.ev_config.prob_evict_.budget_percent * prob_pool_max_size_;
             prob_threshold_ =
                 cfg_.ev_config.prob_evict_.trigger * prob_pool_max_size_;
+            pool_logger().info("Max Size: {}; reaper budget: {}; prob pool "
+                               "size: {}; prob threshold: {}",
+                               max_size_, reaper_budget_, prob_pool_max_size_,
+                               prob_threshold_);
         } else {
             // User provided max size. Verify that it fits into the allowed
             // pool memory budget now that runtime memory information is known.
@@ -74,17 +82,23 @@ class CacheEntryPool {
                                    requested_max_size, max_size_);
             }
         }
+        pool_logger().info("Max Size: {}; reaper budget: {}; prob pool "
+                           "size: {}; prob threshold: {}",
+                           max_size_, reaper_budget_, prob_pool_max_size_,
+                           prob_threshold_);
         initialized_ = true;
         co_await prepopulate_pool();
     }
 
     seastar::future<std::unique_ptr<ttl::Entry>> acquire();
     void release(std::unique_ptr<ttl::Entry> entry);
-    void run_sequential_reaper();
-    seastar::future<> promote_to_sanctuary(std::unique_ptr<ttl::Entry> entry);
+    seastar::future<> run_sequential_reaper();
+    void promote_to_sanctuary(ttl::Entry &entry);
     seastar::future<> set_sequential_eviction_callback(EvictionCallback cb) {
         on_sequential_evict_ = std::move(cb);
+        return seastar::make_ready_future<>();
     }
+    void remove_from_probation(ttl::Entry &entry);
 
     std::size_t calculate_optimal_pool_size() noexcept;
     std::size_t get_available_slots() const;
@@ -117,5 +131,7 @@ class CacheEntryPool {
 
     // The 'hand' for the SIEVE algorithm inside the Sanctuary
     ProbationList::iterator probation_hand_;
-    SievePolicy sieve_policy_;
+    SievePolicy *sieve_policy_ = nullptr;
+
+    EvictionCallback on_sequential_evict_;
 };

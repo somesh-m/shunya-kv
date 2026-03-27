@@ -18,6 +18,8 @@ using vector = std::vector<std::unique_ptr<ttl::Entry>>;
 
 static const db_config test_config{};
 
+SievePolicy make_test_policy() { return SievePolicy(test_config.ev_config); }
+
 seastar::future<vector> acquireSlots(uint64_t count, CacheEntryPool &pool) {
     vector acquired_slots;
     for (uint64_t i = 0; i < count; i++) {
@@ -35,7 +37,8 @@ void releaseSlots(vector &acquired_slots, CacheEntryPool &pool) {
 SEASTAR_TEST_CASE(object_pool_create_by_memory) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         CacheEntryPool pool = CacheEntryPool(0);
-        co_await pool.init(test_config);
+        auto policy = make_test_policy();
+        co_await pool.init(test_config, policy);
         uint64_t pool_size_by_mem = pool.calculate_optimal_pool_size();
         BOOST_REQUIRE_EQUAL(pool.get_total_slots(), pool_size_by_mem);
         BOOST_REQUIRE_EQUAL(pool.get_total_slots(), pool.get_available_slots());
@@ -47,7 +50,8 @@ SEASTAR_TEST_CASE(object_pool_create_by_memory) {
 SEASTAR_TEST_CASE(object_pool_fixed_size) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         CacheEntryPool pool = CacheEntryPool(1024);
-        co_await pool.init(test_config);
+        auto policy = make_test_policy();
+        co_await pool.init(test_config, policy);
         BOOST_REQUIRE_EQUAL(pool.get_total_slots(), 1024);
         BOOST_REQUIRE_EQUAL(pool.get_total_slots(), pool.get_available_slots());
         co_return;
@@ -60,7 +64,8 @@ SEASTAR_TEST_CASE(object_pool_create_overflow) {
     co_await seastar::smp::invoke_on_all(
         [&max_val_size_t]() -> seastar::future<> {
             CacheEntryPool pool = CacheEntryPool(max_val_size_t);
-            co_await pool.init(test_config);
+            auto policy = make_test_policy();
+            co_await pool.init(test_config, policy);
             uint64_t pool_size_by_mem = pool.calculate_optimal_pool_size();
             BOOST_REQUIRE_EQUAL(pool.get_total_slots(), pool_size_by_mem);
             BOOST_REQUIRE_EQUAL(pool.get_total_slots(),
@@ -91,7 +96,8 @@ SEASTAR_TEST_CASE(object_pool_acquire_release) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         uint32_t pool_size = 32;
         CacheEntryPool pool = CacheEntryPool(pool_size);
-        co_await pool.init(test_config);
+        auto policy = make_test_policy();
+        co_await pool.init(test_config, policy);
 
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
@@ -119,11 +125,12 @@ SEASTAR_TEST_CASE(object_pool_multiple_init) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         uint32_t pool_size = 32;
         CacheEntryPool pool = CacheEntryPool(pool_size);
-        co_await pool.init(test_config);
+        auto policy = make_test_policy();
+        co_await pool.init(test_config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
         /* init again */
-        co_await pool.init(test_config);
+        co_await pool.init(test_config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
     });
@@ -133,7 +140,8 @@ SEASTAR_TEST_CASE(object_pool_acquire_overflow) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         uint32_t pool_size = 32;
         CacheEntryPool pool = CacheEntryPool(pool_size);
-        co_await pool.init(test_config);
+        auto policy = make_test_policy();
+        co_await pool.init(test_config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
         vector acquired_slots = co_await acquireSlots(pool_size, pool);
@@ -157,7 +165,8 @@ SEASTAR_TEST_CASE(object_pool_release_overflow) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         uint32_t pool_size = 32;
         CacheEntryPool pool = CacheEntryPool(pool_size);
-        co_await pool.init(test_config);
+        auto policy = make_test_policy();
+        co_await pool.init(test_config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
         /* make a unique pointer of Entry and release it to the pool */
@@ -189,7 +198,8 @@ SEASTAR_TEST_CASE(object_pool_mutate_fields) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         uint32_t pool_size = 1;
         CacheEntryPool pool = CacheEntryPool(pool_size);
-        co_await pool.init(test_config);
+        auto policy = make_test_policy();
+        co_await pool.init(test_config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
 
@@ -234,7 +244,8 @@ SEASTAR_TEST_CASE(object_pool_distinct_pointer) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         uint32_t pool_size = 2048;
         CacheEntryPool pool = CacheEntryPool(pool_size);
-        co_await pool.init(test_config);
+        auto policy = make_test_policy();
+        co_await pool.init(test_config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
 
@@ -243,6 +254,28 @@ SEASTAR_TEST_CASE(object_pool_distinct_pointer) {
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == 0);
     });
+}
+
+SEASTAR_TEST_CASE(object_pool_promote_to_sanctuary_tracks_sieve) {
+    co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
+        CacheEntryPool pool = CacheEntryPool(4);
+        auto policy = make_test_policy();
+        co_await pool.init(test_config, policy);
+
+        auto entry = co_await pool.acquire();
+        BOOST_REQUIRE(entry);
+        BOOST_REQUIRE_EQUAL(policy.size(), 0);
+
+        pool.promote_to_sanctuary(*entry);
+
+        BOOST_REQUIRE_EQUAL(policy.size(), 1);
+        BOOST_REQUIRE(entry->pool_type == ttl::PoolType::Sanctuary);
+
+        pool.release(std::move(entry));
+        BOOST_REQUIRE_EQUAL(policy.size(), 0);
+        co_return;
+    });
+    co_return;
 }
 
 /**

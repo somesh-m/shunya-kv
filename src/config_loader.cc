@@ -22,8 +22,8 @@ static inline bool parse_bool(std::string_view v, bool &out) {
         out = true;
         return true;
     }
-    if (v == "0" || v == "false" || v == "FALSE" || v == "off" ||
-        v == "OFF" || v == "no" || v == "NO") {
+    if (v == "0" || v == "false" || v == "FALSE" || v == "off" || v == "OFF" ||
+        v == "no" || v == "NO") {
         out = false;
         return true;
     }
@@ -154,45 +154,47 @@ void load_config_file(db_config &cfg, const char *path) {
             if (parse_bool(value, parsed)) {
                 cfg.ev_config.soft_.throttle = parsed;
             }
-        } else if (key == "hard_stop") {
-            double parsed = 0.0;
-            if (parse_double(value, parsed)) {
-                cfg.ev_config.hard_.stop = parsed;
-            }
-        } else if (key == "hard_budget") {
-            uint64_t parsed = 0;
-            if (parse_u64(value, parsed)) {
-                cfg.ev_config.hard_.budget = parsed;
-            }
-        } else if (key == "hard_throttle") {
-            bool parsed = false;
-            if (parse_bool(value, parsed)) {
-                cfg.ev_config.hard_.throttle = parsed;
-            }
-        } else if (key == "send_shard_details_on_connect") {
-            bool parsed = false;
-            if (parse_bool(value, parsed)) {
-                cfg.send_shard_details_on_connect = parsed;
-            }
-        } else if (key == "memory_reserve_percentage") {
-            double parsed = 0.0;
-            if (parse_double(value, parsed)) {
-                cfg.pool.memory_reserve_percentage = parsed;
-            }
-        } else if (key == "pool_max_memory_percent") {
-            double parsed = 0.0;
-            if (parse_double(value, parsed)) {
-                cfg.pool.pool_max_memory_percent = parsed;
-            }
-        } else if (key == "page_size_goal") {
-            uint64_t parsed = 0;
-            if (parse_u64(value, parsed)) {
-                cfg.pool.page_size_goal = static_cast<std::size_t>(parsed);
-            }
-        } else if (key == "key_reserve") {
-            uint64_t parsed = 0;
-            if (parse_u64(value, parsed)) {
-                cfg.pool.key_reserve = static_cast<std::size_t>(parsed);
+            // } else if (key == "hard_stop") {
+            //     double parsed = 0.0;
+            //     if (parse_double(value, parsed)) {
+            //         cfg.ev_config.hard_.stop = parsed;
+            //     }
+            // } else if (key == "hard_budget") {
+            //     uint64_t parsed = 0;
+            //     if (parse_u64(value, parsed)) {
+            //         cfg.ev_config.hard_.budget = parsed;
+            //     }
+            // } else if (key == "hard_throttle") {
+            //     bool parsed = false;
+            //     if (parse_bool(value, parsed)) {
+            //         cfg.ev_config.hard_.throttle = parsed;
+            //     }
+            //}
+            else if (key == "send_shard_details_on_connect") {
+                bool parsed = false;
+                if (parse_bool(value, parsed)) {
+                    cfg.send_shard_details_on_connect = parsed;
+                }
+            } else if (key == "memory_reserve_percentage") {
+                double parsed = 0.0;
+                if (parse_double(value, parsed)) {
+                    cfg.pool.memory_reserve_percentage = parsed;
+                }
+            } else if (key == "pool_max_memory_percent") {
+                double parsed = 0.0;
+                if (parse_double(value, parsed)) {
+                    cfg.pool.pool_max_memory_percent = parsed;
+                }
+            } else if (key == "page_size_goal") {
+                uint64_t parsed = 0;
+                if (parse_u64(value, parsed)) {
+                    cfg.pool.page_size_goal = static_cast<std::size_t>(parsed);
+                }
+            } else if (key == "key_reserve") {
+                uint64_t parsed = 0;
+                if (parse_u64(value, parsed)) {
+                    cfg.pool.key_reserve = static_cast<std::size_t>(parsed);
+                }
             }
         }
     }

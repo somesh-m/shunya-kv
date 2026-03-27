@@ -12,13 +12,13 @@ struct db_config {
             {
                 .trigger = 0.8,
                 .stop = 0.7,
-                .budget = 2000,
+                .budget = 500,
                 .throttle = false,
             },
         .prob_evict_ =
             {
                 .trigger = 0.90,
-                .budget_percent = 0.25,
+                .budget_percent = 0.10,
             },
     };
     pool::PoolConfig pool;

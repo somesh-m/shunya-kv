@@ -94,3 +94,7 @@ SievePolicy::evict(uint64_t now) {
 }
 
 void SievePolicy::on_hit(ttl::Entry &e) { e.visited = true; }
+
+std::size_t SievePolicy::size() const noexcept { return sieveList_.size(); }
+
+bool SievePolicy::empty() const noexcept { return sieveList_.empty(); }
