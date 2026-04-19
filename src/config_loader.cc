@@ -7,6 +7,14 @@
 #include <string>
 #include <string_view>
 
+static inline const char *policy_name(eviction::EvictionPolicy policy) {
+    switch (policy) {
+    case eviction::EvictionPolicy::Sieve:
+        return "Sieve";
+    }
+    return "Unknown";
+}
+
 static inline std::string_view trim(std::string_view s) {
     const size_t begin = s.find_first_not_of(" \t\r");
     if (begin == std::string_view::npos) {
@@ -123,7 +131,7 @@ void load_config_file(db_config &cfg, const char *path) {
             continue;
         }
         value = maybe_unquote(value);
-
+        std::cerr << "config: key='" << key << "'\n";
         if (key == "db_port" || key == "base_port" || key == "port") {
             unsigned parsed = 0;
             const auto [ptr, ec] = std::from_chars(
@@ -139,6 +147,11 @@ void load_config_file(db_config &cfg, const char *path) {
             if (parse_policy(value, parsed)) {
                 cfg.ev_config.policy = parsed;
             }
+        } else if (key == "soft_trigger") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.ev_config.soft_.trigger = parsed;
+            }
         } else if (key == "soft_stop") {
             double parsed = 0.0;
             if (parse_double(value, parsed)) {
@@ -152,50 +165,90 @@ void load_config_file(db_config &cfg, const char *path) {
         } else if (key == "soft_throttle") {
             bool parsed = false;
             if (parse_bool(value, parsed)) {
-                cfg.ev_config.soft_.throttle = parsed;
+                cfg.ev_config.soft_.throttle = false;
             }
-            // } else if (key == "hard_stop") {
-            //     double parsed = 0.0;
-            //     if (parse_double(value, parsed)) {
-            //         cfg.ev_config.hard_.stop = parsed;
-            //     }
-            // } else if (key == "hard_budget") {
-            //     uint64_t parsed = 0;
-            //     if (parse_u64(value, parsed)) {
-            //         cfg.ev_config.hard_.budget = parsed;
-            //     }
-            // } else if (key == "hard_throttle") {
-            //     bool parsed = false;
-            //     if (parse_bool(value, parsed)) {
-            //         cfg.ev_config.hard_.throttle = parsed;
-            //     }
-            //}
-            else if (key == "send_shard_details_on_connect") {
-                bool parsed = false;
-                if (parse_bool(value, parsed)) {
-                    cfg.send_shard_details_on_connect = parsed;
-                }
-            } else if (key == "memory_reserve_percentage") {
-                double parsed = 0.0;
-                if (parse_double(value, parsed)) {
-                    cfg.pool.memory_reserve_percentage = parsed;
-                }
-            } else if (key == "pool_max_memory_percent") {
-                double parsed = 0.0;
-                if (parse_double(value, parsed)) {
-                    cfg.pool.pool_max_memory_percent = parsed;
-                }
-            } else if (key == "page_size_goal") {
-                uint64_t parsed = 0;
-                if (parse_u64(value, parsed)) {
-                    cfg.pool.page_size_goal = static_cast<std::size_t>(parsed);
-                }
-            } else if (key == "key_reserve") {
-                uint64_t parsed = 0;
-                if (parse_u64(value, parsed)) {
-                    cfg.pool.key_reserve = static_cast<std::size_t>(parsed);
-                }
+        }
+        // } else if (key == "hard_stop") {
+        //     double parsed = 0.0;
+        //     if (parse_double(value, parsed)) {
+        //         cfg.ev_config.hard_.stop = parsed;
+        //     }
+        // } else if (key == "hard_budget") {
+        //     uint64_t parsed = 0;
+        //     if (parse_u64(value, parsed)) {
+        //         cfg.ev_config.hard_.budget = parsed;
+        //     }
+        // } else if (key == "hard_throttle") {
+        //     bool parsed = false;
+        //     if (parse_bool(value, parsed)) {
+        //         cfg.ev_config.hard_.throttle = parsed;
+        //     }
+        //}
+        else if (key == "send_shard_details_on_connect") {
+            bool parsed = false;
+            if (parse_bool(value, parsed)) {
+                cfg.send_shard_details_on_connect = parsed;
+            }
+        } else if (key == "memory_reserve_percentage") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.pool.memory_reserve_percentage = parsed;
+            }
+        } else if (key == "pool_max_memory_percent") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.pool.pool_max_memory_percent = parsed;
+            }
+        } else if (key == "page_size_goal") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.pool.page_size_goal = static_cast<std::size_t>(parsed);
+            }
+        } else if (key == "key_reserve") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.pool.key_reserve = static_cast<std::size_t>(parsed);
+            }
+        } else if (key == "probationary_pool_size") {
+            std::cout << "parsing prob pool \n";
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                std::cout << "Parsed prob pool size \n";
+                cfg.pool.prob_pool_size_percent = parsed;
+            } else {
+                std::cout << "parsed prob pool size failed \n";
+            }
+        } else if (key == "hard_trigger") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.ev_config.prob_evict_.trigger = parsed;
+            }
+        } else if (key == "hard_budget_percent") {
+            double parsed = 0.0;
+            if (parse_double(value, parsed)) {
+                cfg.ev_config.prob_evict_.budget_percent = parsed;
             }
         }
     }
+
+    std::cerr << "config state:" << " db_port=" << cfg.db_port
+              << " hash=" << cfg.hash << " send_shard_details_on_connect="
+              << (cfg.send_shard_details_on_connect ? "true" : "false")
+              << " policy=" << policy_name(cfg.ev_config.policy)
+              << " soft.trigger=" << cfg.ev_config.soft_.trigger
+              << " soft.stop=" << cfg.ev_config.soft_.stop
+              << " soft.budget=" << cfg.ev_config.soft_.budget
+              << " soft.throttle="
+              << (cfg.ev_config.soft_.throttle ? "true" : "false")
+              << " hard.trigger=" << cfg.ev_config.prob_evict_.trigger
+              << " hard.budget_percent="
+              << cfg.ev_config.prob_evict_.budget_percent
+              << " pool.memory_reserve_percentage="
+              << cfg.pool.memory_reserve_percentage
+              << " pool.pool_max_memory_percent="
+              << cfg.pool.pool_max_memory_percent
+              << " pool.page_size_goal=" << cfg.pool.page_size_goal
+              << " pool.key_reserve=" << cfg.pool.key_reserve
+              << " pool.prob_pool_size_percent="
+              << cfg.pool.prob_pool_size_percent << '\n';
 }

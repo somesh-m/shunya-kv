@@ -108,6 +108,9 @@ seastar::future<std::string> fetchJsonInfo() {
     uint64_t total_key_count = 0;
     uint64_t total_cache_miss = 0;
     uint64_t total_eviction_count = 0;
+    uint64_t total_probationary_pool_total_slots = 0;
+    uint64_t total_probationary_pool_used_slots = 0;
+    uint64_t total_probationary_eviction_count = 0;
 
     std::string json;
     json.reserve(512 + per_shard.size() * 256);
@@ -130,6 +133,12 @@ seastar::future<std::string> fetchJsonInfo() {
         total_key_count += stats.shard_stats.key_count;
         total_cache_miss += stats.shard_stats.cache_miss;
         total_eviction_count += stats.shard_stats.eviction_count;
+        total_probationary_pool_total_slots +=
+            stats.shard_stats.probationary_pool_total_slots;
+        total_probationary_pool_used_slots +=
+            stats.shard_stats.probationary_pool_used_slots;
+        total_probationary_eviction_count +=
+            stats.shard_stats.probationary_eviction_count;
 
         if (shard > 0) {
             json += ",";
@@ -148,7 +157,10 @@ seastar::future<std::string> fetchJsonInfo() {
             "\"pool_fallback_allocs\":{},"
             "\"key_count\":{},"
             "\"cache_miss\":{},"
-            "\"eviction_count\":{}"
+            "\"eviction_count\":{},"
+            "\"prob_pool_total_slots\":{},"
+            "\"prob_pool_used_slots\":{},"
+            "\"prob_pool_eviction_count\":{}"
             "}}",
             shard, format_bytes(stats.allocated_mem),
             format_bytes(stats.free_mem), format_bytes(stats.total_mem),
@@ -156,7 +168,10 @@ seastar::future<std::string> fetchJsonInfo() {
             stats.shard_stats.pool_total_slots,
             stats.shard_stats.pool_available_slots,
             stats.shard_stats.pool_fallback_allocs, stats.shard_stats.key_count,
-            stats.shard_stats.cache_miss, stats.shard_stats.eviction_count);
+            stats.shard_stats.cache_miss, stats.shard_stats.eviction_count,
+            stats.shard_stats.probationary_pool_total_slots,
+            stats.shard_stats.probationary_pool_used_slots,
+            stats.shard_stats.probationary_eviction_count);
     }
 
     json += "],";
@@ -173,13 +188,17 @@ seastar::future<std::string> fetchJsonInfo() {
         "\"pool_fallback_allocs\":{},"
         "\"key_count\":{},"
         "\"cache_miss\":{},"
-        "\"eviction_count\":{}"
+        "\"eviction_count\":{},"
+        "\"prob_pool_total_slots\":{},"
+        "\"prob_pool_used_slots\":{},"
+        "\"prob_pool_eviction_count\":{}"
         "}}",
         format_bytes(total.allocated_mem), format_bytes(total.free_mem),
         format_bytes(total.total_mem), total.total_allocs, total.failed_alloc,
         total_pool_total_slots, total_pool_available_slots,
         total_pool_fallback_allocs, total_key_count, total_cache_miss,
-        total_eviction_count);
+        total_eviction_count, total_probationary_pool_total_slots,
+        total_probationary_pool_used_slots, total_probationary_eviction_count);
 
     json += "}";
 

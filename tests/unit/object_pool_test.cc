@@ -20,6 +20,12 @@ static const db_config test_config{};
 
 SievePolicy make_test_policy() { return SievePolicy(test_config.ev_config); }
 
+db_config make_zero_probation_config() {
+    db_config cfg = test_config;
+    cfg.pool.prob_pool_size_percent = 0.0;
+    return cfg;
+}
+
 seastar::future<vector> acquireSlots(uint64_t count, CacheEntryPool &pool) {
     vector acquired_slots;
     for (uint64_t i = 0; i < count; i++) {
@@ -272,6 +278,33 @@ SEASTAR_TEST_CASE(object_pool_promote_to_sanctuary_tracks_sieve) {
         BOOST_REQUIRE(entry->pool_type == ttl::PoolType::Sanctuary);
 
         pool.release(std::move(entry));
+        BOOST_REQUIRE_EQUAL(policy.size(), 0);
+        co_return;
+    });
+    co_return;
+}
+
+SEASTAR_TEST_CASE(object_pool_reused_entry_relinks_into_sanctuary_when_probation_disabled) {
+    co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
+        CacheEntryPool pool = CacheEntryPool(1);
+        auto policy = make_test_policy();
+        const db_config cfg = make_zero_probation_config();
+        co_await pool.init(cfg, policy);
+
+        auto first = co_await pool.acquire();
+        BOOST_REQUIRE(first);
+        BOOST_REQUIRE_EQUAL(policy.size(), 1);
+        BOOST_REQUIRE(first->pool_type == ttl::PoolType::Sanctuary);
+
+        pool.release(std::move(first));
+        BOOST_REQUIRE_EQUAL(policy.size(), 0);
+
+        auto second = co_await pool.acquire();
+        BOOST_REQUIRE(second);
+        BOOST_REQUIRE_EQUAL(policy.size(), 1);
+        BOOST_REQUIRE(second->pool_type == ttl::PoolType::Sanctuary);
+
+        pool.release(std::move(second));
         BOOST_REQUIRE_EQUAL(policy.size(), 0);
         co_return;
     });

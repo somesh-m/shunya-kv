@@ -9,17 +9,14 @@ inline bool is_expired(uint64_t now, uint64_t expires_at) {
 }
 
 void SievePolicy::on_insert(ttl::Entry &e) {
-    if (e.pool_type == ttl::PoolType::Sanctuary) {
-        // This is already added in the sanctuary
-        // on_insert could be called multiple times
+    if (e.list_hook.is_linked()) {
+        // The entry is already linked into the sanctuary list.
         return;
     }
+
     e.visited = true;
     e.pool_type = ttl::PoolType::Sanctuary;
-
-    if (!e.list_hook.is_linked()) {
-        sieveList_.push_back(e);
-    }
+    sieveList_.push_back(e);
 
     if (hand_ == sieveList_.end()) {
         hand_ = sieveList_.begin();
@@ -79,7 +76,7 @@ SievePolicy::evict(uint64_t now) {
             continue;
         }
 
-        if (evicted_count % 500 == 0) {
+        if (evicted_count % 1000 == 0) {
             co_await seastar::coroutine::maybe_yield();
         }
     }

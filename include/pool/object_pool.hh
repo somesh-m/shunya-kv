@@ -48,13 +48,14 @@ class CacheEntryPool {
         usable_memory_ =
             (1 - cfg_.pool.memory_reserve_percentage) * stats.total_memory();
         pool_max_memory_percent_ = cfg_.pool.pool_max_memory_percent;
-
+        pool_logger().info("pool percent: {}",
+                           cfg_.pool.prob_pool_size_percent);
         if (max_size_ == 0) {
             max_size_ = calculate_optimal_pool_size();
             prob_pool_max_size_ =
                 floor(cfg_.pool.prob_pool_size_percent * max_size_);
-            reaper_budget_ =
-                cfg_.ev_config.prob_evict_.budget_percent * prob_pool_max_size_;
+            reaper_budget_ = 500;
+                // cfg_.ev_config.prob_evict_.budget_percent * prob_pool_max_size_;
             prob_threshold_ =
                 cfg_.ev_config.prob_evict_.trigger * prob_pool_max_size_;
             pool_logger().info("Max Size: {}; reaper budget: {}; prob pool "
@@ -71,16 +72,17 @@ class CacheEntryPool {
             if (total_mem_req > get_max_allowed_memory_for_pool()) {
                 const std::size_t requested_max_size = max_size_;
                 max_size_ = calculate_optimal_pool_size();
-                prob_pool_max_size_ =
-                    floor(cfg_.pool.prob_pool_size_percent * max_size_);
-                reaper_budget_ = cfg_.ev_config.prob_evict_.budget_percent *
-                                 prob_pool_max_size_;
-                prob_threshold_ =
-                    cfg_.ev_config.prob_evict_.trigger * prob_pool_max_size_;
+
                 pool_logger().info("Pool size overflow. Requested {} Feasible "
                                    "{}. Falling back to max entry possible",
                                    requested_max_size, max_size_);
             }
+            prob_pool_max_size_ =
+                floor(cfg_.pool.prob_pool_size_percent * max_size_);
+            reaper_budget_ = 500;
+                // cfg_.ev_config.prob_evict_.budget_percent * prob_pool_max_size_;
+            prob_threshold_ =
+                cfg_.ev_config.prob_evict_.trigger * prob_pool_max_size_;
         }
         pool_logger().info("Max Size: {}; reaper budget: {}; prob pool "
                            "size: {}; prob threshold: {}",
@@ -92,11 +94,14 @@ class CacheEntryPool {
 
     seastar::future<std::unique_ptr<ttl::Entry>> acquire();
     void release(std::unique_ptr<ttl::Entry> entry);
+    seastar::future<std::unique_ptr<ttl::Entry>> do_acquire();
+    void do_release(std::unique_ptr<ttl::Entry> entry);
+    seastar::future<std::unique_ptr<ttl::Entry>> do_prob_acquire();
+    void do_prob_release(std::unique_ptr<ttl::Entry> entry);
     seastar::future<> run_sequential_reaper();
     void promote_to_sanctuary(ttl::Entry &entry);
-    seastar::future<> set_sequential_eviction_callback(EvictionCallback cb) {
+    void set_sequential_eviction_callback(EvictionCallback cb) {
         on_sequential_evict_ = std::move(cb);
-        return seastar::make_ready_future<>();
     }
     void remove_from_probation(ttl::Entry &entry);
 
@@ -109,6 +114,9 @@ class CacheEntryPool {
     std::size_t get_max_allowed_memory_for_pool();
     std::size_t get_used_slots() const;
     std::size_t get_used_prob_slots() const;
+    std::size_t get_used_sanctuary_slots() const;
+    std::size_t get_total_sanctuary_slots() const;
+    std::size_t get_prob_eviction_count() const;
 
   private:
     seastar::circular_buffer<std::unique_ptr<ttl::Entry>> pool_;
@@ -126,6 +134,7 @@ class CacheEntryPool {
     std::shared_ptr<SievePolicy> policy_;
     seastar::future<> prepopulate_pool();
     db_config cfg_;
+    uint64_t prob_eviction_count_{0};
 
     ProbationList probation_list_;
 

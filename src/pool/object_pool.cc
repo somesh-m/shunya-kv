@@ -34,17 +34,30 @@ std::size_t CacheEntryPool::get_total_prob_slots() const {
     return prob_pool_max_size_;
 }
 
+std::size_t CacheEntryPool::get_prob_eviction_count() const {
+    return prob_eviction_count_;
+}
+
 std::size_t CacheEntryPool::get_used_prob_slots() const { return prob_count_; }
 
+std::size_t CacheEntryPool::get_used_sanctuary_slots() const {
+    return sanc_count_;
+}
+
+std::size_t CacheEntryPool::get_total_sanctuary_slots() const {
+    return get_total_slots() - get_total_prob_slots();
+}
+
 seastar::future<> CacheEntryPool::run_sequential_reaper() {
+
     if (probation_list_.empty()) {
+
         co_return;
     }
 
     // Reset to a known-good iterator at the start of each run so we don't
     // carry a stale intrusive-list iterator across unrelated mutations.
     probation_hand_ = probation_list_.begin();
-
     std::vector<seastar::sstring> victim_list;
     victim_list.reserve(reaper_budget_);
 
@@ -60,8 +73,10 @@ seastar::future<> CacheEntryPool::run_sequential_reaper() {
         }
 
         // 2. Collect data and erase
+
         victim_list.push_back(victim_it->key);
         probation_list_.erase(victim_it);
+
         prob_count_--;
         evicted_count++;
 
@@ -72,16 +87,16 @@ seastar::future<> CacheEntryPool::run_sequential_reaper() {
             probation_list_.empty() ? probation_list_.end() : next_it;
 
         // 4. Cooperative multitasking yield
-        if (evicted_count % 200 == 0) {
+        if (evicted_count % 1000 == 0) {
             co_await seastar::coroutine::maybe_yield();
         }
     }
-
+    prob_eviction_count_ += evicted_count;
     if (on_sequential_evict_ && !victim_list.empty()) {
+
         co_await on_sequential_evict_(victim_list);
     }
 
-    // pool_logger().info("reaper logger victim list {}", victim_list.size());
     co_return;
 }
 
@@ -128,23 +143,75 @@ void CacheEntryPool::promote_to_sanctuary(ttl::Entry &entry) {
     sanc_count_++;
 }
 
-seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
+seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::do_acquire() {
     if (pool_.empty()) {
         // pool_logger().info("Bucket empty, generating new object");
         auto entry = std::make_unique<ttl::Entry>();
         entry->value.reserve(value_offset_);
         entry->in_use_ = true;
+        sanc_count_++;
+        if (sieve_policy_ != nullptr) {
+            sieve_policy_->on_insert(*entry);
+        }
+        co_return entry;
+    }
+
+    auto entry = std::move(pool_.front());
+    pool_.pop_front();
+    entry->in_use_ = true;
+    sanc_count_++;
+    if (sieve_policy_ != nullptr) {
+        sieve_policy_->on_insert(*entry);
+    }
+    co_return entry;
+}
+
+seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::do_prob_acquire() {
+    if (pool_.empty()) {
+        auto entry = std::make_unique<ttl::Entry>();
+        entry->value.reserve(value_offset_);
+        entry->in_use_ = true;
         entry->pool_type = ttl::PoolType::Probation;
         prob_count_++;
+        try {
+            co_await run_sequential_reaper();
 
-        // TODO: Check if there is a way to run this but not block the return.
-        // Kind of like run on next tick
-        co_await run_sequential_reaper();
+        } catch (...) {
+            try {
+                throw;
+            } catch (const std::exception &e) {
+                pool_logger().error("acquire reaper failed on fallback "
+                                    "path: {}, backtrace: {}",
+                                    e.what(), seastar::current_backtrace());
+            } catch (...) {
+                pool_logger().error("acquire reaper failed on fallback path: "
+                                    "unknown exception, backtrace: {}",
+                                    seastar::current_backtrace());
+            }
+            throw;
+        }
         co_return entry;
     }
 
     if (prob_count_ >= prob_threshold_) {
-        co_await run_sequential_reaper();
+
+        try {
+            co_await run_sequential_reaper();
+
+        } catch (...) {
+            try {
+                throw;
+            } catch (const std::exception &e) {
+                pool_logger().error("acquire reaper failed on threshold path: "
+                                    "{}, backtrace: {}",
+                                    e.what(), seastar::current_backtrace());
+            } catch (...) {
+                pool_logger().error("acquire reaper failed on threshold path: "
+                                    "unknown exception, backtrace: {}",
+                                    seastar::current_backtrace());
+            }
+            throw;
+        }
     }
     auto entry = std::move(pool_.front());
     pool_.pop_front();
@@ -155,7 +222,49 @@ seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
     co_return entry;
 }
 
-void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
+seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::acquire() {
+    if (prob_pool_max_size_ <= 0) {
+        co_return co_await do_acquire();
+    }
+    co_return co_await do_prob_acquire();
+}
+
+void CacheEntryPool::do_release(std::unique_ptr<ttl::Entry> entry) {
+    if (!entry) {
+        return;
+    }
+
+    entry->in_use_ = false;
+    entry->visited = false;
+    entry->value.clear();
+    entry->key = "";
+    entry->expires_at = 0;
+    entry->ver = 0;
+    entry->heat = 0;
+    entry->last_access = 0;
+    entry->pool_type = ttl::PoolType::Probation;
+
+    if (sieve_policy_ != nullptr) {
+        sieve_policy_->on_erase(*entry.get());
+    }
+    if (sanc_count_ > 0) {
+        sanc_count_--;
+    }
+
+    if (entry->value.capacity() > value_offset_ * 2) {
+        std::string tmp;
+        tmp.reserve(value_offset_);
+        entry->value.swap(tmp);
+    }
+
+    if (pool_.size() < max_size_) {
+        pool_.push_back(std::move(entry));
+        return;
+    }
+    entry.reset();
+}
+
+void CacheEntryPool::do_prob_release(std::unique_ptr<ttl::Entry> entry) {
     if (!entry) {
         return;
     }
@@ -179,6 +288,7 @@ void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
     entry->ver = 0;
     entry->heat = 0;
     entry->last_access = 0;
+    entry->pool_type = ttl::PoolType::Probation;
 
     if (entry->value.capacity() > value_offset_ * 2) {
         std::string tmp;
@@ -192,6 +302,14 @@ void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
     }
 
     entry.reset();
+}
+
+void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
+    if (prob_pool_max_size_ <= 0) {
+        do_release(std::move(entry));
+        return;
+    }
+    do_prob_release(std::move(entry));
 }
 
 std::size_t CacheEntryPool::get_per_entry_size_estimate() {
