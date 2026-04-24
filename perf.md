@@ -45,7 +45,7 @@ Conns: 4\
 Pipeline: 32\
 Max Key: 204404\
 Run Duration: 120s\
-Cache max key count: 51101 * 4 = 204404\
+Cache max key count: 51101 * 4 = 204404
 
 | Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -125,11 +125,11 @@ Cache max key count: 154104 * 4 = 616,416
 | **0:1** | 1290664 | 0.195 | 0.343 | 0.396 | 0.489 | 0.608 |
 | **1:2** | 1153544 | 0.244 | 0.492 | 0.595 | 0.934 | 2.157 |
 
-**Scenario 2 (DPDK)**
-Conns: 4
-Pipeline: 18
-Max Key: 620,300
-Run Duration: 120s
+**Scenario 2 (DPDK)**\
+Conns: 4\
+Pipeline: 18\
+Max Key: 620,300\
+Run Duration: 120s\
 Cache Key Size: 51101 * 4 = 204404
 
 | Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
@@ -161,7 +161,7 @@ Conns: 2\
 Pipeline: 4\
 Max Key: 1,406,900\
 Run Duration: 120s\
-Cache max key count: 175662 * 8 = 1,405,296\
+Cache max key count: 175662 * 8 = 1,405,296
 
 | Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
