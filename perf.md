@@ -27,11 +27,11 @@ All measurements were taken with the database operating entirely in memory, with
 | **Trigger(%)** | 80 | 80 |
 | **Budget(Count)** | 500 | 500 |
 
-**Scenario 1 (Non DPDK)**
-Conns: 4
-Pipeline: 18
-Max Key: 620,300
-Run Duration: 120s
+**Scenario 1 (Non DPDK)**\
+Conns: 4\
+Pipeline: 18\
+Max Key: 620,300\
+Run Duration: 120s\
 Cache max key count: 154104 * 4 = 616,416
 
 | Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
