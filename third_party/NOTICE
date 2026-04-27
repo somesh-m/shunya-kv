@@ -1,0 +1,12 @@
+Third-party notices for ShunyaKV
+
+This repository vendors the FNV reference implementation under
+`third_party/fnv/`.
+
+Component: FNV reference source files
+Upstream: https://github.com/lcn2/fnv
+Location in this repository: `third_party/fnv/`
+License: The Unlicense / public-domain dedication
+
+The vendored FNV files retain their upstream license notice in source
+headers such as `third_party/fnv/fnv.h`.
