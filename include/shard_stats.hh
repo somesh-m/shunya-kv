@@ -12,6 +12,11 @@ struct shard_stats_snapshot {
     std::size_t key_count{0};
     std::size_t eviction_count{0};
     std::size_t cache_miss{0};
+    std::size_t probationary_pool_total_slots{0};
+    std::size_t probationary_pool_used_slots{0};
+    std::size_t probationary_eviction_count{0};
+    std::size_t probation_key_count{0};
+    std::size_t sanctuary_key_count{0};
 };
 
 class shard_stats {
@@ -19,9 +24,14 @@ class shard_stats {
     void record_pool_fallback_alloc() noexcept { ++pool_fallback_allocs_; }
     void record_eviction(std::size_t n = 1) { ++eviction_count_; }
     void record_cache_miss_count(std::size_t n = 1) { ++cache_miss_; }
-    shard_stats_snapshot snapshot(std::size_t pool_available_slots,
-                                  std::size_t pool_total_slots,
-                                  std::size_t key_count) const noexcept {
+    void record_probationary_eviction_count(std::size_t n = 1) {
+        ++probationary_eviction_count_;
+    }
+    shard_stats_snapshot
+    snapshot(std::size_t pool_available_slots, std::size_t pool_total_slots,
+             std::size_t key_count, std::size_t probationary_pool_total_slots,
+             std::size_t probationary_pool_used_slots,
+             std::size_t probationary_eviction_count) const noexcept {
         return {
             .pool_fallback_allocs = pool_fallback_allocs_,
             .pool_available_slots = pool_available_slots,
@@ -29,6 +39,9 @@ class shard_stats {
             .key_count = key_count,
             .eviction_count = eviction_count_,
             .cache_miss = cache_miss_,
+            .probationary_pool_total_slots = probationary_pool_total_slots,
+            .probationary_pool_used_slots = probationary_pool_used_slots,
+            .probationary_eviction_count = probationary_eviction_count,
         };
     }
 
@@ -36,6 +49,9 @@ class shard_stats {
     uint64_t pool_fallback_allocs_{0};
     std::size_t eviction_count_{0};
     std::size_t cache_miss_{0};
+    std::size_t probationary_pool_total_slots_{0};
+    std::size_t probationary_pool_used_slots_{0};
+    std::size_t probationary_eviction_count_{0};
 };
 
 } // namespace shunyakv

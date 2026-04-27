@@ -10,6 +10,8 @@ class CacheEntryPool;
 namespace bi = boost::intrusive;
 
 namespace ttl {
+enum class PoolType { Probation, Sanctuary };
+
 struct Entry {
     std::string value;
 
@@ -40,8 +42,14 @@ struct Entry {
 
     bool visited = false; // used for sieve eviction
 
+    PoolType pool_type = PoolType::Probation;
+
     // This adds the next/prev pointers directly inside the object
+    // This hook is utilized when the object is in the sanctuary
     bi::list_member_hook<bi::link_mode<bi::safe_link>> list_hook;
+
+    // This hook is utilised when the object is in the probationary pool
+    bi::list_member_hook<bi::link_mode<bi::safe_link>> probation_hook;
 
     // provide a function to update the value
     void update_from(Entry &&updated_object, bool update_ttl) {

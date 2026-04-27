@@ -208,6 +208,7 @@ add_test(NAME SIEVE_POLICY_HAND_WRAP_AROUND
 add_executable(object_pool_unit_test
   object_pool_test.cc
   ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
 )
 
 target_include_directories(object_pool_unit_test PRIVATE
@@ -316,6 +317,14 @@ add_test(NAME OBJECT_POOL_MUTATE_FIELDS
 
 add_test(NAME OBJECT_POOL_DISTINCT_POINTER
   COMMAND object_pool_unit_test --run_test=object_pool_distinct_pointer
+)
+
+add_test(NAME OBJECT_POOL_PROMOTE_TO_SANCTUARY_TRACKS_SIEVE
+  COMMAND object_pool_unit_test --run_test=object_pool_promote_to_sanctuary_tracks_sieve
+)
+
+add_test(NAME OBJECT_POOL_REUSED_ENTRY_RELINKS_SANCTUARY_WITHOUT_PROBATION
+  COMMAND object_pool_unit_test --run_test=object_pool_reused_entry_relinks_into_sanctuary_when_probation_disabled
 )
 
 
@@ -433,6 +442,8 @@ add_executable(socket_handler_unit_test
   ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
   ${SHUNYA_SRC_DIR}/cmd_node_info.cc
   ${SHUNYA_SRC_DIR}/node_info_helpers.cc
+  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 

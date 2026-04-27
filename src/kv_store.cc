@@ -62,12 +62,29 @@ seastar::future<> store::start(unsigned, const db_config &cfg) {
                       cfg.pool.memory_reserve_percentage, usable_memory_);
     _map.reserve(27000'00);
 
-    co_await entry_pool_.init(cfg);
     ev_cfg_ = cfg.ev_config;
     if (!sieve_policy_.has_value()) {
         sieve_policy_.emplace(ev_cfg_);
     }
 
+    co_await entry_pool_.init(cfg, *sieve_policy_);
+    entry_pool_.set_sequential_eviction_callback(
+        [this](const std::vector<seastar::sstring> victimList)
+            -> seastar::future<> {
+            uint32_t count = 0;
+            for (const auto &key : victimList) {
+                auto node = _map.extract(key);
+                if (!node.empty()) {
+                    entry_pool_.release(std::move(node.mapped()));
+                    stats_.record_eviction();
+                }
+                count++;
+                if (count % 1000 == 0) {
+                    co_await seastar::coroutine::maybe_yield();
+                }
+            }
+            co_return;
+        });
     co_return;
 }
 
@@ -102,10 +119,14 @@ seastar::future<bool> store::set(std::string_view key_view,
         // We keep the version, heat, and access times so the
         // eviction policies (Sieve/PQ) stay consistent.
         it->second->update_from(std::move(*pooled_entry), false);
+        /**
+         * Since the key was already present, promote it to sanctuary
+         */
+        entry_pool_.promote_to_sanctuary(*it->second.get());
 
         entry_pool_.release(std::move(pooled_entry));
     }
-    sieve_policy_->on_insert(*it->second.get());
+    // sieve_policy_->on_insert(*it->second.get());
     co_await check_memory_and_evict();
     co_return true;
 }
@@ -156,46 +177,14 @@ seastar::future<bool> store::set_with_ttl(std::string_view key_view,
          * destroyed, preserving pooling semantics and avoiding allocator churn.
          */
         it->second->update_from(std::move(*pooled_entry), true);
+
+        entry_pool_.promote_to_sanctuary(*it->second.get());
+
         entry_pool_.release(std::move(pooled_entry));
     }
 
-    // In case of update call, we need to add an entry with ver bumped up. This
-    // will ensure that the older pq_ entry is invalidated. Otherwise, older
-    // expires_at will be considered to expire the key.
-    // const auto heap_start = std::chrono::steady_clock::now();
-    // pq_.push(ttl::HeapNode{.key = std::string_view(it->second->key),
-    //                        .expires_at = it->second->expires_at,
-    //                        .ver = it->second->ver});
-    // const auto heap_us =
-    // std::chrono::duration_cast<std::chrono::microseconds>(
-    //                          std::chrono::steady_clock::now() - heap_start)
-    //                          .count();
-
-    // const auto sieve_start = std::chrono::steady_clock::now();
-    sieve_policy_->on_insert(*it->second.get());
-    // const auto sieve_us =
-    // std::chrono::duration_cast<std::chrono::microseconds>(
-    //                           std::chrono::steady_clock::now() - sieve_start)
-    //                           .count();
-
-    // const auto evict_start = std::chrono::steady_clock::now();
     co_await check_memory_and_evict();
-    // const auto evict_us =
-    // std::chrono::duration_cast<std::chrono::microseconds>(
-    //                           std::chrono::steady_clock::now() - evict_start)
-    //                           .count();
-    // const auto total_us =
-    // std::chrono::duration_cast<std::chrono::microseconds>(
-    //                           std::chrono::steady_clock::now() - op_start)
-    //                           .count();
-    // if (total_us >= 1000) {
-    //     kv_store_log.warn(
-    //         "slow set_with_ttl on shard {} key='{}' total={}us acquire={}us "
-    //         "map={}us heap={}us sieve={}us evict={}us inserted={} map_size={}
-    //         " "pq_size={}", seastar::this_shard_id(), key_view, total_us,
-    //         acquire_us, map_us, heap_us, sieve_us, evict_us, inserted,
-    //         _map.size(), pq_.size());
-    // }
+
     co_return true;
 }
 
@@ -214,6 +203,7 @@ store::get(std::string_view key) {
         entry_pool_.release(std::move(node.mapped()));
         co_return std::nullopt;
     }
+    entry_pool_.promote_to_sanctuary(*entry_ptr);
     sieve_policy_->on_hit(*entry_ptr);
     co_return std::optional<seastar::sstring>(entry_ptr->value);
 }
@@ -226,10 +216,18 @@ void store::set_usable_memory(double reserve_percentage) {
 
 shard_stats_snapshot store::snapshot_stats() const noexcept {
     return stats_.snapshot(entry_pool_.get_available_slots(),
-                           entry_pool_.get_total_slots(), _map.size());
+                           entry_pool_.get_total_slots(), _map.size(),
+                           entry_pool_.get_total_prob_slots(),
+                           entry_pool_.get_used_prob_slots(),
+                           entry_pool_.get_prob_eviction_count());
 }
 
 seastar::future<> store::check_memory_and_evict() {
+    const std::size_t total_slots = entry_pool_.get_total_slots();
+    if (total_slots == 0) {
+        co_return;
+    }
+
     // 1. Get memory statistics for the current shard
     auto stats = seastar::memory::stats();
 
@@ -241,10 +239,13 @@ seastar::future<> store::check_memory_and_evict() {
 
     // 2. Calculate percentage
     double pool_usage_fraction =
-        entry_pool_.get_used_slots() / entry_pool_.get_total_slots();
+        static_cast<double>(entry_pool_.get_used_slots()) / total_slots;
 
     // 3. Trigger eviction if over threshold (e.g., 80%)
     const double soft_trigger = ev_cfg_.soft_.trigger;
+
+    // kv_store_log.info("Pool usage fraction {} soft trigger {}",
+    //                   pool_usage_fraction, soft_trigger);
     eviction::EvictConfig config;
     eviction::EvictionType type;
     // soft eviction applies on pool and hard trigger on total memory
@@ -253,22 +254,23 @@ seastar::future<> store::check_memory_and_evict() {
         sieve_policy_->set_eviction_type(type);
         HOTPATHLOGS(
             kv_store_log.info("Starting {} eviction\n Usage fraction {}",
-                              to_string(type), usage_fraction));
+                              to_string(type), pool_usage_fraction));
         // TODO: Remove ttl related code after establishing correctness
         // co_await evict_ttl_keys(now_s(), 300);
         if (!sieve_policy_.has_value())
             co_return;
         const auto sieve_victims = co_await sieve_policy_->evict(now_s());
-        HOTPATHLOGS(kv_store_log.info("Victim Keys {}", sieve_victims.size()));
+        // kv_store_log.info("Victim Keys {}", sieve_victims.size());
+        uint32_t count = 0;
+
         for (const auto &key : sieve_victims) {
-            uint32_t count = 0;
             auto node = _map.extract(key);
             if (!node.empty()) {
                 entry_pool_.release(std::move(node.mapped()));
                 stats_.record_eviction();
             }
             count++;
-            if (count % 100 == 0) {
+            if (count % 1000 == 0) {
                 co_await seastar::coroutine::maybe_yield();
             }
         }

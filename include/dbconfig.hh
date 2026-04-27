@@ -10,20 +10,25 @@ struct db_config {
         .policy = eviction::EvictionPolicy::Sieve,
         .soft_ =
             {
-                .trigger = 0.6,
-                .stop = 0.6,
-                .budget = 1000,
+                .trigger = 0,
+                .stop = 0,
+                .budget = 0,
                 .throttle = false,
             },
-        .hard_ =
+        .prob_evict_ =
             {
-                .trigger = 0.8,
-                .stop = 0.7,
-                .budget = 3000,
-                .throttle = true,
+                .trigger = 0,
+                .prob_budget = 0,
             },
     };
-    pool::PoolConfig pool;
+
+    pool::PoolConfig pool{
+        .memory_reserve_percentage = 0.15,
+        .pool_max_memory_percent = 0,
+        .page_size_goal = 0,
+        .key_reserve = 0,
+        .prob_pool_size_percent = 0,
+    };
 
     uint16_t db_port{60110};
     seastar::sstring hash{"fnv1a64"};

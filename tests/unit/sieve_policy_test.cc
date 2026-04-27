@@ -35,13 +35,13 @@ SievePolicy init(uint32_t budget) {
                 .budget = budget,
                 .throttle = false,
             },
-        .hard_ =
-            {
-                .trigger = 0.8,
-                .stop = 0.7,
-                .budget = budget,
-                .throttle = true,
-            },
+        // .hard_ =
+        //     {
+        //         .trigger = 0.8,
+        //         .stop = 0.7,
+        //         .budget = budget,
+        //         .throttle = true,
+        //     },
     };
 
     auto sieve_policy = SievePolicy(ev_cfg);

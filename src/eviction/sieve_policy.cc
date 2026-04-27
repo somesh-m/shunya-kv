@@ -9,11 +9,14 @@ inline bool is_expired(uint64_t now, uint64_t expires_at) {
 }
 
 void SievePolicy::on_insert(ttl::Entry &e) {
-    e.visited = true;
-
-    if (!e.list_hook.is_linked()) {
-        sieveList_.push_back(e);
+    if (e.list_hook.is_linked()) {
+        // The entry is already linked into the sanctuary list.
+        return;
     }
+
+    e.visited = true;
+    e.pool_type = ttl::PoolType::Sanctuary;
+    sieveList_.push_back(e);
 
     if (hand_ == sieveList_.end()) {
         hand_ = sieveList_.begin();
@@ -42,6 +45,7 @@ void SievePolicy::on_erase(ttl::Entry &e) {
 seastar::future<std::vector<seastar::sstring>>
 SievePolicy::evict(uint64_t now) {
     std::vector<seastar::sstring> victim_list;
+    victim_list.reserve(evictParams.budget);
     if (sieveList_.empty()) {
         co_return victim_list;
     }
@@ -72,7 +76,7 @@ SievePolicy::evict(uint64_t now) {
             continue;
         }
 
-        if (evicted_count % 500 == 0) {
+        if (evicted_count % 1000 == 0) {
             co_await seastar::coroutine::maybe_yield();
         }
     }
@@ -87,3 +91,7 @@ SievePolicy::evict(uint64_t now) {
 }
 
 void SievePolicy::on_hit(ttl::Entry &e) { e.visited = true; }
+
+std::size_t SievePolicy::size() const noexcept { return sieveList_.size(); }
+
+bool SievePolicy::empty() const noexcept { return sieveList_.empty(); }

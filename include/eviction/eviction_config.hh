@@ -8,12 +8,13 @@ struct EvictConfig {
     double trigger;
     double stop;
     uint64_t budget;
+    uint64_t prob_budget = 0.0; // Used only in case of probation pool
     bool throttle;
 };
 
 struct EvictionConfig {
     EvictionPolicy policy{EvictionPolicy::Sieve};
     EvictConfig soft_;
-    EvictConfig hard_;
+    EvictConfig prob_evict_; // Used for evicting from probation pool
 };
 } // namespace eviction

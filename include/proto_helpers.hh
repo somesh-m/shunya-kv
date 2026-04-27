@@ -52,4 +52,20 @@ parse_set_kv(std::string_view rest) {
     return {k, rtrim(tail)}; // keep spaces inside value; strip trailing CR/LF
 }
 
+inline bool ieq(const std::string_view &a, const char *b) {
+    if (a.size() != std::strlen(b))
+        return false;
+    for (size_t i = 0; i < a.size(); i++) {
+        char ca = a[i];
+        char cb = b[i];
+        if ('a' <= ca && ca <= 'z')
+            ca = char(ca - 'a' + 'A');
+        if ('a' <= cb && cb <= 'z')
+            cb = char(cb - 'a' + 'A');
+        if (ca != cb)
+            return false;
+    }
+    return true;
+}
+
 } // namespace shunyakv::proto

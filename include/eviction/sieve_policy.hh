@@ -25,8 +25,7 @@ class SievePolicy {
     seastar::future<std::vector<seastar::sstring>> evict(uint64_t now);
 
     void set_eviction_type(eviction::EvictionType type) {
-        evictParams =
-            type == eviction::EvictionType::soft ? evCfg_.soft_ : evCfg_.hard_;
+        evictParams = evCfg_.soft_;
     }
 
     std::size_t size() const noexcept;
@@ -36,5 +35,5 @@ class SievePolicy {
     SieveList sieveList_;
     SieveList::iterator hand_;
     eviction::EvictionConfig evCfg_;
-    eviction::EvictConfig evictParams = evCfg_.hard_;
+    eviction::EvictConfig evictParams = evCfg_.soft_;
 };

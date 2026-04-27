@@ -69,6 +69,10 @@ void service::record_set_latency(uint64_t latency_us) noexcept {
 
 void service::record_cache_miss() noexcept { ++_req_counters.cache_miss; }
 
+void service::record_cache_miss_count(std::size_t n) noexcept {
+    _store.record_cache_miss_count(n);
+}
+
 request_counters service::snapshot_request_counters() const noexcept {
     return _req_counters;
 }

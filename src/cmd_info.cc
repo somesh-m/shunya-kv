@@ -8,6 +8,7 @@
 #include <chrono>
 #include <hash.hh>
 #include <optional>
+#include <proto_helpers.hh>
 #include <seastar/core/future.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/memory.hh>
@@ -16,8 +17,12 @@
 #include <seastar/core/when_all.hh>
 #include <seastar/util/log.hh>
 #include <string>
+#include <unistd.h>
 
 namespace shunyakv {
+
+seastar::future<std::string> fetchJsonInfo();
+seastar::future<std::string> fetchInfo();
 
 struct STATS {
     uint64_t total_allocs;
@@ -65,12 +70,142 @@ seastar::future<> handle_info(const resp::ArgvView &cmd,
                               seastar::output_stream<char> &out,
                               shunyakv::service & /*store*/) {
     // command syntax check
-    if (cmd.size() != 1) {
+    if (cmd.size() > 2) {
         co_await resp::write_error(out,
                                    "ERR wrong number of arguements for 'INFO'");
         co_return;
     }
+    std::string payload;
+    if (cmd.size() == 2) {
+        if (!shunyakv::proto::ieq(cmd[1], "JSON")) {
+            co_await resp::write_error(out, "Invalid sub arg for 'INFO'");
+            co_return;
+        }
+        payload = co_await fetchJsonInfo();
+    } else {
+        payload = co_await fetchInfo();
+    }
+    co_await resp::write_bulk(out, seastar::sstring(payload));
+    co_return;
+}
 
+seastar::future<std::string> fetchJsonInfo() {
+    std::vector<seastar::future<STATS>> futures;
+    futures.reserve(seastar::smp::count);
+
+    for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
+        futures.emplace_back(seastar::smp::submit_to(
+            shard, [] { return collect_statistics(); }));
+    }
+
+    auto per_shard =
+        co_await seastar::when_all_succeed(futures.begin(), futures.end());
+
+    STATS total{};
+    uint64_t total_pool_total_slots = 0;
+    uint64_t total_pool_available_slots = 0;
+    uint64_t total_pool_fallback_allocs = 0;
+    uint64_t total_key_count = 0;
+    uint64_t total_cache_miss = 0;
+    uint64_t total_eviction_count = 0;
+    uint64_t total_probationary_pool_total_slots = 0;
+    uint64_t total_probationary_pool_used_slots = 0;
+    uint64_t total_probationary_eviction_count = 0;
+
+    std::string json;
+    json.reserve(512 + per_shard.size() * 256);
+
+    json += "{";
+    json += "\"shard_info\":[";
+
+    for (unsigned shard = 0; shard < per_shard.size(); ++shard) {
+        const auto &stats = per_shard[shard];
+
+        total.total_allocs += stats.total_allocs;
+        total.free_mem += stats.free_mem;
+        total.allocated_mem += stats.allocated_mem;
+        total.total_mem += stats.total_mem;
+        total.failed_alloc += stats.failed_alloc;
+
+        total_pool_total_slots += stats.shard_stats.pool_total_slots;
+        total_pool_available_slots += stats.shard_stats.pool_available_slots;
+        total_pool_fallback_allocs += stats.shard_stats.pool_fallback_allocs;
+        total_key_count += stats.shard_stats.key_count;
+        total_cache_miss += stats.shard_stats.cache_miss;
+        total_eviction_count += stats.shard_stats.eviction_count;
+        total_probationary_pool_total_slots +=
+            stats.shard_stats.probationary_pool_total_slots;
+        total_probationary_pool_used_slots +=
+            stats.shard_stats.probationary_pool_used_slots;
+        total_probationary_eviction_count +=
+            stats.shard_stats.probationary_eviction_count;
+
+        if (shard > 0) {
+            json += ",";
+        }
+
+        json += seastar::format(
+            "{{"
+            "\"shard_id\":{},"
+            "\"allocated_memory\":\"{}\","
+            "\"free_memory\":\"{}\","
+            "\"total_memory\":\"{}\","
+            "\"total_allocs\":{},"
+            "\"failed_allocs\":{},"
+            "\"pool_total_slots\":{},"
+            "\"pool_available_slots\":{},"
+            "\"pool_fallback_allocs\":{},"
+            "\"key_count\":{},"
+            "\"cache_miss\":{},"
+            "\"eviction_count\":{},"
+            "\"prob_pool_total_slots\":{},"
+            "\"prob_pool_used_slots\":{},"
+            "\"prob_pool_eviction_count\":{}"
+            "}}",
+            shard, format_bytes(stats.allocated_mem),
+            format_bytes(stats.free_mem), format_bytes(stats.total_mem),
+            stats.total_allocs, stats.failed_alloc,
+            stats.shard_stats.pool_total_slots,
+            stats.shard_stats.pool_available_slots,
+            stats.shard_stats.pool_fallback_allocs, stats.shard_stats.key_count,
+            stats.shard_stats.cache_miss, stats.shard_stats.eviction_count,
+            stats.shard_stats.probationary_pool_total_slots,
+            stats.shard_stats.probationary_pool_used_slots,
+            stats.shard_stats.probationary_eviction_count);
+    }
+
+    json += "],";
+
+    json += seastar::format(
+        "\"shard_cumulative_info\":{{"
+        "\"allocated_memory\":\"{}\","
+        "\"free_memory\":\"{}\","
+        "\"total_memory\":\"{}\","
+        "\"total_allocs\":{},"
+        "\"failed_allocs\":{},"
+        "\"pool_total_slots\":{},"
+        "\"pool_available_slots\":{},"
+        "\"pool_fallback_allocs\":{},"
+        "\"key_count\":{},"
+        "\"cache_miss\":{},"
+        "\"eviction_count\":{},"
+        "\"prob_pool_total_slots\":{},"
+        "\"prob_pool_used_slots\":{},"
+        "\"prob_pool_eviction_count\":{}"
+        "}}",
+        format_bytes(total.allocated_mem), format_bytes(total.free_mem),
+        format_bytes(total.total_mem), total.total_allocs, total.failed_alloc,
+        total_pool_total_slots, total_pool_available_slots,
+        total_pool_fallback_allocs, total_key_count, total_cache_miss,
+        total_eviction_count, total_probationary_pool_total_slots,
+        total_probationary_pool_used_slots, total_probationary_eviction_count);
+
+    json += "}";
+
+    co_return json;
+}
+
+seastar::future<std::string> fetchInfo() {
     std::vector<seastar::future<STATS>> futures;
     futures.reserve(seastar::smp::count);
     for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
@@ -84,7 +219,7 @@ seastar::future<> handle_info(const resp::ArgvView &cmd,
     STATS total{};
     std::string payload;
     payload.reserve(256 + per_shard.size() * 128);
-    payload += "# Memory\r\n";
+    payload += "desc: shard_info\n";
 
     for (unsigned shard = 0; shard < per_shard.size(); ++shard) {
         const auto &stats = per_shard[shard];
@@ -97,7 +232,8 @@ seastar::future<> handle_info(const resp::ArgvView &cmd,
         // total.eviction_count += stats.eviction_count;
 
         payload += seastar::format(
-            "shard_{}\nallocated_memory: {}\nfree_memory: {}\ntotal_memory: "
+            "shard_no: {}\nallocated_memory: {}\nfree_memory: "
+            "{}\ntotal_memory: "
             "{}\ntotal_allocs: {}\nfailed_allocs: {}\npool_total_slots: "
             "{}\npool_available_slots: {}\npool_fallback_allocs: "
             "{}\nkey_count: {}\ncache_miss: {}\neviction_count: {}\n\n",
@@ -110,15 +246,13 @@ seastar::future<> handle_info(const resp::ArgvView &cmd,
             stats.shard_stats.cache_miss, stats.shard_stats.eviction_count);
     }
 
-    payload += "# Cumulative\r\n";
+    payload += "desc: total_info\n";
     payload += seastar::format(
         "allocated_memory: {}\nfree_memory: {}\ntotal_memory: {}\n"
         "total_allocs: {}\nfailed_allocs: {}\n",
         format_bytes(total.allocated_mem), format_bytes(total.free_mem),
         format_bytes(total.total_mem), total.total_allocs, total.failed_alloc);
-
-    co_await resp::write_bulk(out, seastar::sstring(payload));
-    co_return;
+    co_return payload;
 }
 
 } // namespace shunyakv
