@@ -18,7 +18,7 @@ struct db_config {
         .prob_evict_ =
             {
                 .trigger = 0,
-                .budget_percent = 0,
+                .prob_budget = 0,
             },
     };
 

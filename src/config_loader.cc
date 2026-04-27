@@ -167,24 +167,7 @@ void load_config_file(db_config &cfg, const char *path) {
             if (parse_bool(value, parsed)) {
                 cfg.ev_config.soft_.throttle = false;
             }
-        }
-        // } else if (key == "hard_stop") {
-        //     double parsed = 0.0;
-        //     if (parse_double(value, parsed)) {
-        //         cfg.ev_config.hard_.stop = parsed;
-        //     }
-        // } else if (key == "hard_budget") {
-        //     uint64_t parsed = 0;
-        //     if (parse_u64(value, parsed)) {
-        //         cfg.ev_config.hard_.budget = parsed;
-        //     }
-        // } else if (key == "hard_throttle") {
-        //     bool parsed = false;
-        //     if (parse_bool(value, parsed)) {
-        //         cfg.ev_config.hard_.throttle = parsed;
-        //     }
-        //}
-        else if (key == "send_shard_details_on_connect") {
+        } else if (key == "send_shard_details_on_connect") {
             bool parsed = false;
             if (parse_bool(value, parsed)) {
                 cfg.send_shard_details_on_connect = parsed;
@@ -223,10 +206,10 @@ void load_config_file(db_config &cfg, const char *path) {
             if (parse_double(value, parsed)) {
                 cfg.ev_config.prob_evict_.trigger = parsed;
             }
-        } else if (key == "hard_budget_percent") {
-            double parsed = 0.0;
-            if (parse_double(value, parsed)) {
-                cfg.ev_config.prob_evict_.budget_percent = parsed;
+        } else if (key == "hard_budget") {
+            uint64_t parsed = 0;
+            if (parse_u64(value, parsed)) {
+                cfg.ev_config.prob_evict_.prob_budget = parsed;
             }
         }
     }
@@ -241,8 +224,7 @@ void load_config_file(db_config &cfg, const char *path) {
               << " soft.throttle="
               << (cfg.ev_config.soft_.throttle ? "true" : "false")
               << " hard.trigger=" << cfg.ev_config.prob_evict_.trigger
-              << " hard.budget_percent="
-              << cfg.ev_config.prob_evict_.budget_percent
+              << " hard.budget=" << cfg.ev_config.prob_evict_.prob_budget
               << " pool.memory_reserve_percentage="
               << cfg.pool.memory_reserve_percentage
               << " pool.pool_max_memory_percent="

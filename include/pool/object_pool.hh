@@ -54,8 +54,7 @@ class CacheEntryPool {
             max_size_ = calculate_optimal_pool_size();
             prob_pool_max_size_ =
                 floor(cfg_.pool.prob_pool_size_percent * max_size_);
-            reaper_budget_ = 500;
-                // cfg_.ev_config.prob_evict_.budget_percent * prob_pool_max_size_;
+            reaper_budget_ = cfg_.ev_config.prob_evict_.prob_budget;
             prob_threshold_ =
                 cfg_.ev_config.prob_evict_.trigger * prob_pool_max_size_;
             pool_logger().info("Max Size: {}; reaper budget: {}; prob pool "
@@ -79,8 +78,7 @@ class CacheEntryPool {
             }
             prob_pool_max_size_ =
                 floor(cfg_.pool.prob_pool_size_percent * max_size_);
-            reaper_budget_ = 500;
-                // cfg_.ev_config.prob_evict_.budget_percent * prob_pool_max_size_;
+            reaper_budget_ = cfg_.ev_config.prob_evict_.prob_budget;
             prob_threshold_ =
                 cfg_.ev_config.prob_evict_.trigger * prob_pool_max_size_;
         }
