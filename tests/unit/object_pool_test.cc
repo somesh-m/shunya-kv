@@ -26,6 +26,12 @@ db_config make_zero_probation_config() {
     return cfg;
 }
 
+db_config make_full_probation_config() {
+    db_config cfg = test_config;
+    cfg.pool.prob_pool_size_percent = 1.0;
+    return cfg;
+}
+
 seastar::future<vector> acquireSlots(uint64_t count, CacheEntryPool &pool) {
     vector acquired_slots;
     for (uint64_t i = 0; i < count; i++) {
@@ -44,7 +50,9 @@ SEASTAR_TEST_CASE(object_pool_create_by_memory) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         CacheEntryPool pool = CacheEntryPool(0);
         auto policy = make_test_policy();
-        co_await pool.init(test_config, policy);
+        db_config config = test_config;
+        config.pool.pool_max_memory_percent = 0.3;
+        co_await pool.init(config, policy);
         uint64_t pool_size_by_mem = pool.calculate_optimal_pool_size();
         BOOST_REQUIRE_EQUAL(pool.get_total_slots(), pool_size_by_mem);
         BOOST_REQUIRE_EQUAL(pool.get_total_slots(), pool.get_available_slots());
@@ -57,7 +65,9 @@ SEASTAR_TEST_CASE(object_pool_fixed_size) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         CacheEntryPool pool = CacheEntryPool(1024);
         auto policy = make_test_policy();
-        co_await pool.init(test_config, policy);
+        db_config config = test_config;
+        config.pool.pool_max_memory_percent = 0.8;
+        co_await pool.init(config, policy);
         BOOST_REQUIRE_EQUAL(pool.get_total_slots(), 1024);
         BOOST_REQUIRE_EQUAL(pool.get_total_slots(), pool.get_available_slots());
         co_return;
@@ -71,7 +81,9 @@ SEASTAR_TEST_CASE(object_pool_create_overflow) {
         [&max_val_size_t]() -> seastar::future<> {
             CacheEntryPool pool = CacheEntryPool(max_val_size_t);
             auto policy = make_test_policy();
-            co_await pool.init(test_config, policy);
+            db_config config = test_config;
+            config.pool.pool_max_memory_percent = 0.3;
+            co_await pool.init(config, policy);
             uint64_t pool_size_by_mem = pool.calculate_optimal_pool_size();
             BOOST_REQUIRE_EQUAL(pool.get_total_slots(), pool_size_by_mem);
             BOOST_REQUIRE_EQUAL(pool.get_total_slots(),
@@ -103,7 +115,9 @@ SEASTAR_TEST_CASE(object_pool_acquire_release) {
         uint32_t pool_size = 32;
         CacheEntryPool pool = CacheEntryPool(pool_size);
         auto policy = make_test_policy();
-        co_await pool.init(test_config, policy);
+        db_config config = test_config;
+        config.pool.pool_max_memory_percent = 0.3;
+        co_await pool.init(config, policy);
 
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
@@ -132,11 +146,13 @@ SEASTAR_TEST_CASE(object_pool_multiple_init) {
         uint32_t pool_size = 32;
         CacheEntryPool pool = CacheEntryPool(pool_size);
         auto policy = make_test_policy();
-        co_await pool.init(test_config, policy);
+        db_config config = test_config;
+        config.pool.pool_max_memory_percent = 0.3;
+        co_await pool.init(config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
         /* init again */
-        co_await pool.init(test_config, policy);
+        co_await pool.init(config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
     });
@@ -147,7 +163,9 @@ SEASTAR_TEST_CASE(object_pool_acquire_overflow) {
         uint32_t pool_size = 32;
         CacheEntryPool pool = CacheEntryPool(pool_size);
         auto policy = make_test_policy();
-        co_await pool.init(test_config, policy);
+        db_config config = test_config;
+        config.pool.pool_max_memory_percent = 0.3;
+        co_await pool.init(config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
         vector acquired_slots = co_await acquireSlots(pool_size, pool);
@@ -172,7 +190,9 @@ SEASTAR_TEST_CASE(object_pool_release_overflow) {
         uint32_t pool_size = 32;
         CacheEntryPool pool = CacheEntryPool(pool_size);
         auto policy = make_test_policy();
-        co_await pool.init(test_config, policy);
+        db_config config = test_config;
+        config.pool.pool_max_memory_percent = 0.3;
+        co_await pool.init(config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
         /* make a unique pointer of Entry and release it to the pool */
@@ -205,7 +225,9 @@ SEASTAR_TEST_CASE(object_pool_mutate_fields) {
         uint32_t pool_size = 1;
         CacheEntryPool pool = CacheEntryPool(pool_size);
         auto policy = make_test_policy();
-        co_await pool.init(test_config, policy);
+        db_config config = make_full_probation_config();
+        config.pool.pool_max_memory_percent = 0.3;
+        co_await pool.init(config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
 
@@ -251,7 +273,9 @@ SEASTAR_TEST_CASE(object_pool_distinct_pointer) {
         uint32_t pool_size = 2048;
         CacheEntryPool pool = CacheEntryPool(pool_size);
         auto policy = make_test_policy();
-        co_await pool.init(test_config, policy);
+        db_config config = test_config;
+        config.pool.pool_max_memory_percent = 0.3;
+        co_await pool.init(config, policy);
         BOOST_REQUIRE(pool.get_total_slots() == pool_size &&
                       pool.get_available_slots() == pool_size);
 
@@ -266,7 +290,9 @@ SEASTAR_TEST_CASE(object_pool_promote_to_sanctuary_tracks_sieve) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         CacheEntryPool pool = CacheEntryPool(4);
         auto policy = make_test_policy();
-        co_await pool.init(test_config, policy);
+        db_config config = make_full_probation_config();
+        config.pool.pool_max_memory_percent = 0.3;
+        co_await pool.init(config, policy);
 
         auto entry = co_await pool.acquire();
         BOOST_REQUIRE(entry);
@@ -284,7 +310,8 @@ SEASTAR_TEST_CASE(object_pool_promote_to_sanctuary_tracks_sieve) {
     co_return;
 }
 
-SEASTAR_TEST_CASE(object_pool_reused_entry_relinks_into_sanctuary_when_probation_disabled) {
+SEASTAR_TEST_CASE(
+    object_pool_reused_entry_relinks_into_sanctuary_when_probation_disabled) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         CacheEntryPool pool = CacheEntryPool(1);
         auto policy = make_test_policy();
