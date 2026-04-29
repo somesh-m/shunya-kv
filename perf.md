@@ -53,6 +53,30 @@ The cache eviction strategy was kept constant across all experiments:
 - Scaling from 4 → 8 cores shows near-linear throughput improvement
 - Sub-ms regime significantly reduces tail latency at the cost of ~15–25% throughput
 
+## Performance Benchmarks
+
+### 1. Vertical Scalability
+ShunyaKV demonstrates near-linear scaling as CPU resources increase.
+
+![Scalability Chart](/assets/scalability.png)
+
+*Figure 1: Throughput vs p99.9 Latency scaling from 4 to 8 cores.*
+
+### 2. Latency Distribution (Sub-millisecond Stability)
+High throughput is only useful if it is predictable. This chart shows the latency distribution from p50 (average) up to p99.9 (worst-case tail).
+
+![Latency Percentiles](/assets/latency.png)
+*Figure 2: Latency distribution showing DPDK maintaining sub-ms p99.9 even under heavy load.*
+
+### 3. Workload Throughput
+The DPDK-backed transport layer provides a ~30% throughput uplift over standard POSIX networking.
+
+![Workload Throughput](/assets/qps_workload.png)
+
+### 4. Throughput-Latency Curve
+The following curve identifies the system's saturation point, maintaining a flat latency profile until 4M+ QPS.
+
+![Throughput Latency Curve](/assets/throughput_latency_curve.png)
 ---
 
 ## Benchmark Results
