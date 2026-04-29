@@ -63,6 +63,55 @@ To mitigate this, ShunyaKV moves the "routing intelligence" to the client-side. 
     2. Selects the pre-established Connection that belongs to that shard.
     3. Transmits the request, ensuring it lands directly on the shard that owns the data.
 * **The Fallback Safety Net:** ShunyaKV remains resilient. If a client is unable to secure an exclusive connection to a specific shard (or is not "Smart-Aware"), the server will still process the request by internally routing it to the correct owner. This ensures that while "Smart" clients achieve maximum performance, legacy or simple clients still maintain full compatibility.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+
+    box "ShunyaKV Node"
+    participant S0 as "Shard 0 (Core 0)"
+    participant S1 as "Shard 1 (Core 1)"
+    end
+
+    Note over Client, S1: Phase 1: Connection & Discovery
+    Client->>S1: TCP Handshake (port 60111)
+    Note right of S1: Hardware RSS distributes to Shard 1
+    activate S1
+    S1-->>Client: Accept Connection (C1)
+    Client->>S1: NODE_INFO
+    S1-->>Client: Returns ID: 1, FNV-1a Config
+    Note left of Client: Maps Connection C1 to Shard 1
+    deactivate S1
+
+    Client->>S0: TCP Handshake (port 60111)
+    Note right of S0: Hardware RSS distributes to Shard 0
+    activate S0
+    S0-->>Client: Accept Connection (C0)
+    Client->>S0: NODE_INFO
+    S0-->>Client: Returns ID: 0
+    Note left of Client: Maps Connection C0 to Shard 0
+    deactivate S0
+
+    Note over Client, S1: Phase 2: Smart Client Execution (Zero-Hop)
+    Note right of Client: FNV-1a("user_123") maps to Shard 0
+    Client->>S0: GET user_123 (via C0)
+    activate S0
+    Note right of S0: Local Lookup
+    S0-->>Client: Response
+    deactivate S0
+
+    Note over Client, S1: Phase 3: Legacy Client (Reroute Hop)
+    Note right of Client: Key maps to Shard 0, but client uses C1
+    Client->>S1: GET user_123 (via C1)
+    activate S1
+    Note right of S1: Determines owner is Shard 0
+    S1->>S0: Inter-shard forward (submit_to)
+    activate S0
+    S0-->>S1: Result
+    deactivate S0
+    S1-->>Client: Response
+    deactivate S1
+```
 
 ## 2.2. Storage & Memory Efficiency
 
