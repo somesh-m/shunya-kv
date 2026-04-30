@@ -23,8 +23,11 @@ ShunyaKV is built for extreme efficiency. As CPU resources increase, throughput 
 
 ---
 
-👉 **[View the Full Performance Deep-Dive (perf.md)](./perf.md)**
+## 📚 Deep Dives
 
+- 📊 [Performance](./perf.md)
+- 🛠 [Architecture](./docs/architecture.md)
+- 🧭 [Future Work](./docs/future.md)
 ---
 
 ## 🛠 Core Architecture
