@@ -1,156 +1,154 @@
+# ShunyaKV
 
-# ShunyaKV In-Memory Benchmark Report
+> **Current Version:** `v0.1.1`
+> **Status:** Beta — under active development
 
-## Overview
-This report presents **latency and throughput benchmarks** for **ShunyaKV**, an in-memory key-value store built on an event-driven, shard-per-core architecture.
+**ShunyaKV** is a high-performance, shared-nothing Key-Value store designed to eliminate the "locking tax" in multi-core systems. By leveraging **DPDK** for kernel-bypass networking and a **shard-per-core** architecture, it delivers predictable sub-millisecond tail latency and near-linear vertical scalability.
 
-The benchmarks evaluate:
-- Service latency under low offered load
-- Scaling behavior as concurrency increases
-- Queueing effects at high throughput
+ShunyaKV is currently in **beta** and is under heavy development. APIs, configuration options, benchmarking behavior, and internal architecture may evolve as the project matures. The current release, **v0.1.1**, focuses on validating the core architecture, performance characteristics, Docker-based distribution, and benchmarking workflow.
 
-All measurements were taken with the database operating entirely in memory, without any disk I/O.
+## 🚀 Performance at a Glance
 
-### Experiment Structure
+ShunyaKV is built for extreme efficiency. As CPU resources increase, throughput climbs while tail latency remains stable—or even improves—due to reduced contention.
 
-Benchmarks were conducted on two system configurations:
+![ShunyaKV Scalability](/assets/scalability.png)
+\
+*Figure: Doubling cores from 4 to 8 yields a ~1.8x throughput increase and reduces p99.9 latency by ~50%.*
 
-- Cache: c7g.xlarge | Client: c7g.2xlarge
-- Cache: c7g.2xlarge | Client: c7g.4xlarge
+### Key Metrics (8-Core DPDK)
 
-For each configuration, performance was evaluated under two operating regimes:
-
-- **Max Throughput (Max QPS):**
-  Maximum achievable throughput while maintaining p99.9 latency within an acceptable bound.
-
-- **Sub-ms Latency:**
-  Throughput achieved while keeping p99.9 latency approximately at or below 1 ms.
-
-Each experiment was executed using both:
-- Linux native networking stack
-- DPDK-based networking
+- **Max Throughput:** 4,514,472 ops/sec (GET workload)
+- **Tail Latency:** 0.992ms (p99.9)
+- **Efficiency:** ~30% faster than standard POSIX networking stacks.
 
 ---
 
-### Cache Configuration
+## 📚 Deep Dives
 
-The cache eviction strategy was kept constant across all experiments:
+- 📊 [Performance](./perf.md)
+- 🛠 [Architecture](./docs/architecture.md)
+- 🧭 [Future Work](./docs/future.md)
+---
 
-|  | Probationary Pool | Sanctuary Pool |
-| :---: | :---: | :---: |
-| **Eviction Algo** | Reaper (FIFO) | Sieve |
-| **Size (%)** | 75 | 25 |
-| **Trigger (%)** | 80 | 80 |
-| **Budget (Count)** | 500 | 500 |
+## 🛠 Core Architecture
+
+- **Shared-Nothing Design:** Each CPU core manages its own memory shard, eliminating the need for mutexes or spinlocks.
+- **Kernel Bypass (DPDK):** Moves packet processing to user space, significantly reducing context-switching overhead and interrupt storms.
+- **Deterministic Partitioning:** Uses the **FNV-1a** hashing algorithm to ensure uniform data distribution across shards with zero cross-core communication.
+
+## 🚀 Installation
+
+You can build **ShunyaKV** directly from source using CMake. The following steps will compile the project and generate the binaries:
+
+```bash
+mkdir build && cd build
+cmake ..
+make -j
+```
+
+All build artifacts will be created inside the `build/` directory.
 
 ---
 
-## Key Findings
+## 🧪 Running Tests
 
-- DPDK improves throughput by ~25–35% across workloads
-- GET throughput consistently exceeds SET by ~20–30%
-- Mixed workloads (1:2) show significant tail latency amplification (p99.9)
-- Scaling from 4 → 8 cores shows near-linear throughput improvement
-- Sub-ms regime significantly reduces tail latency at the cost of ~15–25% throughput
+ShunyaKV uses **CTest** for unit testing. After building the project, run:
+
+```bash
+ctest
+```
+
+This validates core components such as request parsing, command handling, and internal data structures.
 
 ---
 
-## Benchmark Results
+## 🐳 Docker Support
 
-### 1. Max Throughput
-This regime measures maximum throughput while maintaining p99.9 latency within an acceptable bound.
+ShunyaKV provides Docker support for easy setup and multi-architecture builds.
 
-**1.1** **Server:** `c7g.xlarge (CPU: 4, Mem: 8GB)` | **Client:** `c7g.2xlarge (CPU: 8, Mem: 16GB)`
+### Build Locally
 
-**1.1.1 Linux Native networking stack**\
-Conns: 4 | Pipeline: 18 | Max Key: 620,300 | Run Duration: 120s | Cache max key count: 154104 * 4 = 616,416
+```bash
+# ARM64
+docker build -f Dockerfile.aarch64 -t shunyakv:arm64 .
 
-| Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1:0** | 1321856 | 0.320 | 0.710 | 0.834 | 1.038 | 1.390 |
-| **0:1** | 1669015 | 0.248 | 0.496 | 0.586 | 0.784 | 1.023 |
-| **1:2** | 1311247 | 0.304 | 0.688 | 0.838 | 1.282 | 3.375 |
+# x86_64
+docker build -f Dockerfile -t shunyakv:x86_64 .
+```
 
-**1.1.2 DPDK Networking stack**\
-Conns: 4 | Pipeline: 32 | Max Key: 204404 | Run Duration: 120s | Cache max key count: 51101 * 4 = 204404
+### Use Prebuilt Image
 
-| Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1:0** | 2020725 | 0.291 | 0.762 | 0.919 | 1.215 | 1.536 |
-| **0:1** | 2537331 | 0.187 | 0.487 | 0.605 | 1.842 | 2.067 |
-| **1:2** | 2023710 | 0.265 | 0.788 | 0.964 | 1.602 | 2.785 |
+To get started quickly without building locally:
 
-*To avoid Out-Of-Memory (OOM) termination on 8GB instances, the maximum cache size was limited to 2GB, leaving 6GB for DPDK's hugepage allocation and operating system overhead.*
+```bash
+docker pull shunyalabs/shunyakv:latest
+```
 
-**1.2 Server:** `c7g.2xlarge (CPU: 8, Mem: 16GB)` | **Client:** `c7g.4xlarge (CPU: 16, Mem: 32GB)`
+For the current beta release:
 
-**1.2.1 Linux Native networking stack**\
-Conns: 6 | Pipeline: 10 | Max Key: 1,406,900 | Run Duration: 120s | Cache max key count: 175662 * 8 = 1,405,296
+```bash
+docker pull shunyalabs/shunyakv:0.1.1
+```
 
-| Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1:0** | 3029411 | 0.267 | 0.700 | 0.856 | 1.249 | 1.885 |
-| **0:1** | 3905488 | 0.200 | 0.471 | 0.585 | 0.884 | 1.364 |
-| **1:2** | 3003761 | 0.247 | 0.705 | 0.923 | 1.602 | 4.149 |
+---
 
-**1.2.2 DPDK Networking stack**\
-Conns: 6\
-Pipeline: 10\
-Max Key: 1,406,900\
-Run Duration: 120s\
-Cache max key count: 175662 * 8 = 1,405,296
+## ▶️ Starting ShunyaKV
 
-| Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1:0** | 3,459,203 | 0.223 | 0.586 | 0.719 | 1.038 | 1.533 |
-| **0:1** | 4,514,472 | 0.161 | 0.374 | 0.458 | 0.667 | 0.992 |
-| **1:2** | 3,402,916 | 0.214 | 0.592 | 0.821 | 1.457 | 4.018 |
+### POSIX Network Stack
 
-**All the latency figures are in ms(milliseconds)*
+```bash
+sudo docker run --rm -it --privileged \
+  -p 60111:60111 \
+  -v "$PWD/config.conf:/config.conf:ro" \
+  shunyalabs/shunyakv:latest
+```
 
-### 2. Sub ms Latency
-This regime evaluates throughput under a strict p99.9 latency target of ~1 ms.\
+**Optional flags:**
 
-**2.1 Server:** `c7g.xlarge (CPU: 4, Mem: 8GB)` | **Client:** `c7g.2xlarge (CPU: 8, Mem: 16GB)`
+- `--smp <num_cores>`: Number of CPU cores to use
+- `--memory <size>`: Memory allocation for ShunyaKV
 
-**2.1.1 Linux Native networking stack**\
-Conns: 4 | Pipeline: 12 | Max Key: 620,300 | Run Duration: 120s | Cache max key count: 154104 * 4 = 616,416
+> ⚠️ It is recommended to use **physical cores only**. Using logical/hyperthreaded cores can increase contention and may degrade performance.
 
-| Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1:0** | 1157404 | 0.243 | 0.529 | 0.623 | 0.801 | 1.020 |
-| **0:1** | 1290664 | 0.195 | 0.343 | 0.396 | 0.489 | 0.608 |
-| **1:2** | 1153544 | 0.244 | 0.492 | 0.595 | 0.934 | 2.157 |
+---
 
-**2.1.2 DPDK Networking stack**\
-Conns: 4 | Pipeline: 18 | Max Key: 620,300 | Run Duration: 120s | Cache Key Size: 51101 * 4 = 204404
+### DPDK / Native Network Stack
 
-| Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1:0** | 1857183 | 0.192 | 0.464 | 0.534 | 0.690 | 0.929 |
-| **0:1** | 2285447 | 0.157 | 0.326 | 0.385 | 0.500 | 0.655 |
-| **1:2** | 1858979 | 0.200 | 0.454 | 0.563 | 0.965 | 1.916 |
+```bash
+sudo docker run --rm -it --privileged \
+  -p 60111:60111 \
+  -v "$PWD/config.conf:/config.conf:ro" \
+  shunyalabs/shunyakv:latest \
+  --network-stack native --dpdk-pmd --poll-mode
+```
 
-*To avoid Out-Of-Memory (OOM) termination on 8GB instances, the maximum cache size was limited to 2GB, leaving 6GB for DPDK's hugepage allocation and operating system overhead.*
+This mode enables high-performance packet processing using DPDK.
 
-**2.2 Server:** `c7g.2xlarge (CPU: 8, Mem: 16GB)` | **Client:** `c7g.4xlarge (CPU: 16, Mem: 32GB)`
+---
 
-**2.2.1 Linux Native networking stack**\
-Conns: 2 | Pipeline: 4 | Max Key: 1,406,900 | Run Duration: 120s | Cache max key count: 175662 * 8 = 1,405,296
+## 📊 Benchmarking Tool
 
-| Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1:0** | 2,330,753 | 0.150 | 0.351 | 0.421 | 0.571 | 0.877 |
-| **0:1** | 2,803,757 | 0.138 | 0.242 | 0.287 | 0.389 | 0.585 |
-| **1:2** | 2,312,260 | 0.156 | 0.318 | 0.399 | 0.697 | 1.985 |
+To evaluate performance and run load tests, use the dedicated benchmarking tool:
 
-**2.2.2 DPDK Networking stack**\
-Conns: 2 | Pipeline: 4 | Max Key: 1,406,900 | Run Duration: 120s | Cache max key count: 175662 * 8 = 1,405,296
+https://github.com/somesh-m/shunyakv-benchmark-cpp
 
-| Workload Ratio (Set:Get) | Throughput (ops/sec) | p50 | p90 | p95 | p99 | p99.9 |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1:0** | 2,725,446 | 0.123 | 0.302 | 0.358 | 0.473 | 0.623 |
-| **0:1** | 3,432,051 | 0.110 | 0.183 | 0.216 | 0.291 | 0.393 |
-| **1:2** | 2,768,299 | 0.126 | 0.254 | 0.319 | 0.612 | 1.571 |
+The benchmarking tool supports:
 
-*All the latency figures are in ms(milliseconds)*
+- Configurable workloads
+- Pipelining
+
+This allows you to measure throughput and latency under realistic scenarios.
+
+---
+
+## ⚠️ Project Status
+
+ShunyaKV is currently in **beta** and under heavy development.
+
+The current version is:
+
+```text
+v0.1.1
+```
+
+This release is intended for experimentation, benchmarking, architecture validation, and early feedback. Production usage is not recommended yet unless you are comfortable with possible breaking changes and evolving internals.
