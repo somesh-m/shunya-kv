@@ -81,13 +81,13 @@ docker build -f Dockerfile -t shunyakv:x86_64 .
 To get started quickly without building locally:
 
 ```bash
-docker pull shunyalabs/shunyakv:latest
+docker pull shunyakv/shunyakv:latest
 ```
 
 For the current beta release:
 
 ```bash
-docker pull shunyalabs/shunyakv:0.1.1
+docker pull shunyakv/shunyakv:0.1.1
 ```
 
 ---
@@ -100,7 +100,7 @@ docker pull shunyalabs/shunyakv:0.1.1
 sudo docker run --rm -it --privileged \
   -p 60111:60111 \
   -v "$PWD/config.conf:/config.conf:ro" \
-  shunyalabs/shunyakv:latest
+  shunyakv/shunyakv:latest
 ```
 
 **Optional flags:**
@@ -118,7 +118,7 @@ sudo docker run --rm -it --privileged \
 sudo docker run --rm -it --privileged \
   -p 60111:60111 \
   -v "$PWD/config.conf:/config.conf:ro" \
-  shunyalabs/shunyakv:latest \
+  shunyakv/shunyakv:latest \
   --network-stack native --dpdk-pmd --poll-mode
 ```
 
