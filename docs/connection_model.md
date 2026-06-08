@@ -145,47 +145,118 @@ This directly increases:
 - CPU overhead
 - cross-shard contention
 
-**What must a client do to fix this?**
+## Client Implementation Guidelines
 
-To avoid cross-shard forwarding and achieve maximum locality, a ShunyaKV client must implement shard-aware routing.
+To avoid cross-shard forwarding and achieve maximum locality, a ShunyaKV client should implement shard-aware routing.
 
-1. ### **Establish Initial Connection**
+### 1. Establish Initial Connection
 
-2. Connect to the server using the advertised port.
+1. Connect to the server using the advertised port.
 
-3. Once connected, send: NODE_INFO2
-4. The server responds with the key range owned by the shard handling that connection.
-5. **Discover All Shards**
-6. Continue opening new connections to the same port.
-7. For each connection:
+2. Once connected, send:
 
-    1. Issue NODE_INFO
-    2. Record the key range returned
-    3. Repeat until connections covering all CPU shards are obtained.
+   ```text
+   NODE_INFO
+   ```
 
-    ⚠️ Important:
+3. The server responds with the key range owned by the shard handling that connection.
 
-8. _Use timeouts for connection attempts._
+### 2. Discover All Shards
 
-9. _If some shards are not discovered, continue operating._
-10. _Requests sent to the wrong shard will still be honored (with internal forwarding), though at reduced efficiency._
-11. **Maintain Shard-Aware Routing**
-12. The client should:
-    1. Maintain a mapping of key-range → connection pool
-    2. Hash the key client-side
-    3. Select the correct shard pool
-13. Use:
-    1. Round-robin
-    2. Weighted round-robin
-    3. Or custom load strategy
-14. Connection pooling per shard is recommended for parallelism.
+1. Continue opening new connections to the same port.
+2. For each connection:
 
-15. ### **Graceful Degradation**
+   1. Issue:
 
-16. The system continues functioning.
+      ```text
+      NODE_INFO
+      ```
 
-17. Internal forwarding ensures correctness.
-18. Only latency and throughput are affected.
+   2. Record the key range returned.
+
+   3. Repeat until connections covering all CPU shards are obtained.
+
+> **Important**
+>
+> 1. Use timeouts for connection attempts.
+> 2. If some shards are not discovered, continue operating.
+> 3. Requests sent to the wrong shard will still be honored through internal forwarding, though at reduced efficiency.
+
+### 3. Maintain Shard-Aware Routing
+
+The client should:
+
+1. Maintain a mapping of `key-range → connection pool`.
+2. Hash the key client-side.
+3. Select the correct shard pool.
+
+### 4. Select a Connection Strategy
+
+To pick a connection from the shard-specific pool, the client can use:
+
+1. Round-robin
+2. Weighted round-robin
+3. A custom load-balancing strategy
+
+Connection pooling per shard is recommended for parallelism.
+
+### 5. Graceful Degradation
+
+1. The system continues functioning even when connections to all shards cannot be secured.
+2. Internal forwarding ensures that requests are routed to the correct shard.
+3. In such cases, latency and throughput will be degraded.
+
+### Connection Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+
+    box "ShunyaKV Node"
+    participant S0 as "Shard 0 (Core 0)"
+    participant S1 as "Shard 1 (Core 1)"
+    end
+
+    Note over Client, S1: Phase 1: Connection & Discovery
+    Client->>S1: TCP Handshake (port 60111)
+    Note right of S1: Hardware RSS distributes to Shard 1
+    activate S1
+    S1-->>Client: Accept Connection (C1)
+    Client->>S1: NODE_INFO
+    S1-->>Client: Returns ID: 1, FNV-1a Config
+    Note left of Client: Maps Connection C1 to Shard 1
+    deactivate S1
+
+    Client->>S0: TCP Handshake (port 60111)
+    Note right of S0: Hardware RSS distributes to Shard 0
+    activate S0
+    S0-->>Client: Accept Connection (C0)
+    Client->>S0: NODE_INFO
+    S0-->>Client: Returns ID: 0
+    Note left of Client: Maps Connection C0 to Shard 0
+    deactivate S0
+
+    Note over Client, S1: Phase 2: Smart Client Execution (Zero-Hop)
+    Note right of Client: FNV-1a("user_123") maps to Shard 0
+    Client->>S0: GET user_123 (via C0)
+    activate S0
+    Note right of S0: Local Lookup
+    S0-->>Client: Response
+    deactivate S0
+
+    Note over Client, S1: Phase 3: Legacy Client (Reroute Hop)
+    Note right of Client: Key maps to Shard 0, but client uses C1
+    Client->>S1: GET user_123 (via C1)
+    activate S1
+    Note right of S1: Determines owner is Shard 0
+    S1->>S0: Inter-shard forward (submit_to)
+    activate S0
+    S0-->>S1: Result
+    deactivate S0
+    S1-->>Client: Response
+    deactivate S1
+```
 
 ## **Summary**
 
