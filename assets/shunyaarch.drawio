@@ -311,10 +311,10 @@
           </mxGeometry>
         </mxCell>
         <mxCell id="RaRmm5Zi0C7OsjpwAnEh-38" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font face=&quot;Comic Sans MS&quot; style=&quot;font-size: 33px; color: light-dark(rgb(0, 0, 0), rgb(137, 140, 237));&quot;&gt;&lt;b&gt;ShunyaKV Architecture&lt;/b&gt;&lt;/font&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" vertex="1">
-          <mxGeometry height="80" width="599.5" x="256.5" y="80" as="geometry" />
+          <mxGeometry height="61" width="599.5" x="256.5" y="134" as="geometry" />
         </mxCell>
         <mxCell id="RaRmm5Zi0C7OsjpwAnEh-39" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="" vertex="1">
-          <mxGeometry height="110" width="248" x="62" y="650" as="geometry" />
+          <mxGeometry height="110" width="278" x="62" y="650" as="geometry" />
         </mxCell>
         <mxCell id="RaRmm5Zi0C7OsjpwAnEh-40" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;html=1;rounded=0;dashed=1;endArrow=oval;endFill=1;exitX=-0.003;exitY=0.62;exitDx=0;exitDy=0;exitPerimeter=0;startArrow=openThin;startFill=0;strokeColor=light-dark(#000000,#FF8000);strokeWidth=1.5;" value="">
           <mxGeometry relative="1" width="80" as="geometry">
@@ -369,11 +369,11 @@
             <mxPoint x="130" y="720" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="RaRmm5Zi0C7OsjpwAnEh-48" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;b&gt;&lt;font face=&quot;Comic Sans MS&quot;&gt;Direct(RSS to Shard)&lt;/font&gt;&lt;/b&gt;" vertex="1">
-          <mxGeometry height="30" width="148" x="142" y="666" as="geometry" />
+        <mxCell id="RaRmm5Zi0C7OsjpwAnEh-48" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;b&gt;&lt;font face=&quot;Comic Sans MS&quot;&gt;Direct(RSS -&amp;gt; Shard)&lt;/font&gt;&lt;/b&gt;" vertex="1">
+          <mxGeometry height="30" width="188" x="142" y="666" as="geometry" />
         </mxCell>
-        <mxCell id="RaRmm5Zi0C7OsjpwAnEh-49" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;b&gt;&lt;font face=&quot;Comic Sans MS&quot;&gt;Forwarded Between Shards&lt;/font&gt;&lt;/b&gt;" vertex="1">
-          <mxGeometry height="30" width="148" x="138" y="709" as="geometry" />
+        <mxCell id="RaRmm5Zi0C7OsjpwAnEh-49" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;b&gt;&lt;font face=&quot;Comic Sans MS&quot;&gt;Forwarded: Non-owner -&amp;gt; Owner&lt;/font&gt;&lt;/b&gt;" vertex="1">
+          <mxGeometry height="30" width="192" x="138" y="709" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
