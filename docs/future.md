@@ -1,7 +1,4 @@
 # 1. Future Work & Roadmap
-ShunyaKV’s current architecture establishes a high-performance, shared-nothing foundation optimized for single-node, multi-core scalability. The following roadmap outlines the next set of enhancements aimed at evolving the system into a fully distributed, intelligent, and production-grade data platform.
-
-# 1. Future Work & Roadmap
 
 ShunyaKV’s current architecture establishes a high-performance, shared-nothing foundation optimized for single-node, multi-core scalability. The following roadmap outlines the next set of enhancements aimed at evolving the system into a fully distributed, intelligent, and production-grade data platform.
 
