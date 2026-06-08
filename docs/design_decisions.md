@@ -1,3 +1,5 @@
+This document captures the design decisions made during the development of ShunyaKV, along with the reasoning behind them. Maintaining this document is important because it provides a reference for the thought process behind each design choice and helps explain why the system is structured the way it is today.
+
 #### Shared Nothing Architecture
 
 Lock contention is a critical bottleneck in modern software systems. As processors scale to tens or hundreds of cores, algorithms and data structures can end up spending a significant amount of time contending for locks instead of doing useful work. This remains one of the key engineering challenges for latency-sensitive and high-throughput systems.
