@@ -15,6 +15,9 @@ Because shard-owned data and memory are isolated, cores do not repeatedly conten
 
 Communication between shards happens through explicit, non-blocking message passing. This ensures that a thread does not block on a system call, a lock, or another thread’s activity during normal request processing.
 
+The following diagram illustrates the request flow from the client to ShunyaKV, showing how packets are distributed through NIC RSS queues, processed by CPU-local shards, and forwarded to the owner shard when required.
+![ShunyaKV request flow](/assets/shunya_arch.jpg)
+
 # 2. Architecture
 
 ## 2.1. Sharding & Network Architecture
