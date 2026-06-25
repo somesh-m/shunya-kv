@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <dbconfig.hh>
+#include <ttl/entry.hh>
 #include <seastar/core/memory.hh>
 #include <seastar/util/log.hh>
 
@@ -19,9 +20,13 @@ class ShardMemoryManager {
         auto stats = seastar::memory::stats();
         usable_memory_ = (1 - (cfg_.pool.memory_reserve_percentage / 100)) *
                          stats.total_memory();
-        pool_max_memory_ =
-            (cfg_.pool.pool_max_memory_percent / 100) * usable_memory_;
         value_offset_ = cfg.pool.page_size_goal + cfg.pool.key_reserve;
+        pool_max_memory_ =
+            (cfg_.pool.pool_max_memory_percent / 100.0) * usable_memory_;
+        const std::size_t minimum_entry_size = sizeof(ttl::Entry) + value_offset_;
+        if (pool_max_memory_ > 0 && pool_max_memory_ < minimum_entry_size) {
+            pool_max_memory_ = minimum_entry_size;
+        }
         manager_logger().info("ALL SHARD MAX USABLE MEMORY: {}",
                               usable_memory_);
         manager_logger().info("ALL SHARD POOL MAX MEMORY: {}",

@@ -238,7 +238,8 @@ std::size_t CacheEntryPool::calculate_optimal_pool_size() noexcept {
         return 0;
     }
     const std::size_t estimated_entry_size = get_per_entry_size_estimate();
-    const std::size_t pool_size = target_memory / estimated_entry_size;
+    const std::size_t pool_size =
+        std::max<std::size_t>(1, target_memory / estimated_entry_size);
     pool_logger().info("Shard Id: {}\n Usable Memory: {} GB \nPool Count: {}\n "
                        "Estimated entry size {} \n",
                        seastar::this_shard_id(),

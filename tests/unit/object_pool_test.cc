@@ -83,7 +83,7 @@ SEASTAR_TEST_CASE(object_pool_fixed_size) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         auto policy = make_test_policy();
         db_config config = test_config;
-        config.pool.pool_max_memory_percent = 0.8;
+        config.pool.pool_max_memory_percent = 80;
         TestPoolContext ctx(config, 1024);
         co_await ctx.pool.init(policy);
         BOOST_REQUIRE_EQUAL(ctx.pool.get_total_slots(), 1024);
@@ -138,7 +138,7 @@ SEASTAR_TEST_CASE(object_pool_acquire_release) {
         uint32_t pool_size = 32;
         auto policy = make_test_policy();
         db_config config = test_config;
-        config.pool.pool_max_memory_percent = 0.3;
+        config.pool.pool_max_memory_percent = 30;
         TestPoolContext ctx(config, pool_size);
         co_await ctx.pool.init(policy);
 
@@ -169,7 +169,7 @@ SEASTAR_TEST_CASE(object_pool_multiple_init) {
         uint32_t pool_size = 32;
         auto policy = make_test_policy();
         db_config config = test_config;
-        config.pool.pool_max_memory_percent = 0.3;
+        config.pool.pool_max_memory_percent = 30;
         TestPoolContext ctx(config, pool_size);
         co_await ctx.pool.init(policy);
         BOOST_REQUIRE(ctx.pool.get_total_slots() == pool_size &&
@@ -187,7 +187,7 @@ SEASTAR_TEST_CASE(object_pool_acquire_overflow) {
         uint32_t pool_size = 32;
         auto policy = make_test_policy();
         db_config config = test_config;
-        config.pool.pool_max_memory_percent = 0.3;
+        config.pool.pool_max_memory_percent = 30;
         TestPoolContext ctx(config, pool_size);
         co_await ctx.pool.init(policy);
         BOOST_REQUIRE(ctx.pool.get_total_slots() == pool_size &&
@@ -216,7 +216,7 @@ SEASTAR_TEST_CASE(object_pool_release_overflow) {
         uint32_t pool_size = 32;
         auto policy = make_test_policy();
         db_config config = test_config;
-        config.pool.pool_max_memory_percent = 0.3;
+        config.pool.pool_max_memory_percent = 30;
         TestPoolContext ctx(config, pool_size);
         co_await ctx.pool.init(policy);
         BOOST_REQUIRE(ctx.pool.get_total_slots() == pool_size &&
@@ -238,7 +238,7 @@ SEASTAR_TEST_CASE(object_pool_mutate_fields) {
         uint32_t pool_size = 1;
         auto policy = make_test_policy();
         db_config config = make_full_probation_config();
-        config.pool.pool_max_memory_percent = 0.3;
+        config.pool.pool_max_memory_percent = 30;
         TestPoolContext ctx(config, pool_size);
         co_await ctx.pool.init(policy);
         BOOST_REQUIRE(ctx.pool.get_total_slots() == pool_size &&
@@ -286,7 +286,7 @@ SEASTAR_TEST_CASE(object_pool_distinct_pointer) {
         uint32_t pool_size = 2048;
         auto policy = make_test_policy();
         db_config config = test_config;
-        config.pool.pool_max_memory_percent = 0.3;
+        config.pool.pool_max_memory_percent = 30;
         TestPoolContext ctx(config, pool_size);
         co_await ctx.pool.init(policy);
         BOOST_REQUIRE(ctx.pool.get_total_slots() == pool_size &&
@@ -303,7 +303,7 @@ SEASTAR_TEST_CASE(object_pool_promote_to_sanctuary_tracks_sieve) {
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         auto policy = make_test_policy();
         db_config config = make_full_probation_config();
-        config.pool.pool_max_memory_percent = 0.3;
+        config.pool.pool_max_memory_percent = 30;
         TestPoolContext ctx(config, 4);
         co_await ctx.pool.init(policy);
 
@@ -328,7 +328,7 @@ SEASTAR_TEST_CASE(
     co_await seastar::smp::invoke_on_all([]() -> seastar::future<> {
         auto policy = make_test_policy();
         db_config config = make_zero_probation_config();
-        config.pool.pool_max_memory_percent = 0.3;
+        config.pool.pool_max_memory_percent = 30;
         TestPoolContext ctx(config, 1);
         co_await ctx.pool.init(policy);
 
