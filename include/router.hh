@@ -2,6 +2,7 @@
 #include "dbconfig.hh"
 #include "kv_store.hh"
 #include "router_metrics.hh"
+#include "vector/vector_store.hh"
 
 #include "hotpath_metrics.hh"
 #include "pool/shard_memory_manager.hh"
@@ -23,9 +24,14 @@ class service {
   public:
     future<> start(const db_config &cfg);
     future<> stop();
+    // Might be using sstring for value in local_set is not the best choice.
     future<bool> local_set(std::string_view, sstring);
     future<bool> local_set(std::string_view, sstring, uint64_t);
     future<std::optional<sstring>> local_get(std::string_view);
+    future<bool> local_vset(std::string_view index, std::string_view key,
+                            std::vector<float> embedding, std::string value);
+    future<std::optional<std::string>>
+    local_vsearch(std::string_view index, std::vector<float> query_embedding);
     void record_get(bool) noexcept;
     void record_set(bool) noexcept;
     void record_get_latency(uint64_t) noexcept;
@@ -44,6 +50,7 @@ class service {
 
     // Instantiate any other store here in the future.
     store _store;
+    VectorStore vector_store_;
     bool _started{false};
     request_counters _req_counters;
     request_latency_counters _latency_counters;

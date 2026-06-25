@@ -17,16 +17,28 @@ future<> service::start(const db_config &cfg) {
     }
     memory_manager_.emplace(cfg);
 
+    co_await vector_store_.start(this_shard_id(), cfg, *memory_manager_);
+    co_await _store.start(this_shard_id(), cfg, *memory_manager_);
     _started = true;
-    co_return co_await _store.start(this_shard_id(), cfg, *memory_manager_);
+    co_return;
 }
 
 future<> service::stop() {
     if (!_started) {
         co_return;
     }
+    co_await vector_store_.stop();
+    co_await _store.stop();
     _started = false;
-    co_return co_await _store.stop();
+    co_return;
+}
+
+future<bool> service::local_vset(std::string_view index, std::string_view key, std::vector<float> embedding, std::string value) {
+    // This is shard local, so the request has arrived to the most favoured shard already
+}
+
+future<std::optional<std::string>> service::local_vsearch(std::string_view index, std::vector<float> query_embedding) {
+    
 }
 
 future<bool> service::local_set(std::string_view key, sstring value) {

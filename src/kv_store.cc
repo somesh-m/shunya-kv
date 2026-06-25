@@ -60,8 +60,8 @@ seastar::future<> store::start(unsigned, const db_config &cfg,
      */
 
     set_usable_memory(cfg.pool.memory_reserve_percentage);
-    kv_store_log.info("Memory reserve percent {}, usable memory {}",
-                      cfg.pool.memory_reserve_percentage, usable_memory_);
+    // kv_store_log.info("Memory reserve percent {}, usable memory {}",
+    //                   cfg.pool.memory_reserve_percentage, usable_memory_);
     _map.reserve(27000'00);
 
     ev_cfg_ = cfg.ev_config;
