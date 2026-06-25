@@ -2,31 +2,10 @@
 #include <memory>
 #include <seastar/core/coroutine.hh>
 
-seastar::future<> CacheEntryPool::prepopulate_pool() {
-    pool_.reserve(max_size_);
-    // Populate the full time pool
-    for (std::size_t i = 0; i < max_size_; i++) {
-        auto entry = std::make_unique<ttl::Entry>();
-        entry->value.reserve(value_offset_);
-        pool_.push_back(std::move(entry));
-        if (i % 500 == 0) {
-            co_await seastar::coroutine::maybe_yield();
-        }
-    }
+std::size_t CacheEntryPool::get_available_slots() const { return pool_.available(); }
+std::size_t CacheEntryPool::get_total_slots() const { return pool_.total_allocated(); }
+std::size_t CacheEntryPool::get_used_slots() const { return pool_.used(); }
 
-    // Record the free mem which is supposed to be the baseline for on
-    auto stats = seastar::memory::stats();
-    free_after_pool_ = stats.free_memory();
-    pool_logger().info("Shard Id: {}; Pool size: {} ", seastar::this_shard_id(),
-                       pool_.size());
-    co_return;
-}
-
-std::size_t CacheEntryPool::get_available_slots() const { return pool_.size(); }
-std::size_t CacheEntryPool::get_total_slots() const { return max_size_; }
-std::size_t CacheEntryPool::get_used_slots() const {
-    return max_size_ - pool_.size();
-}
 std::size_t CacheEntryPool::get_available_prob_slots() const {
     return prob_pool_max_size_ - prob_count_;
 }
@@ -144,60 +123,22 @@ void CacheEntryPool::promote_to_sanctuary(ttl::Entry &entry) {
 }
 
 seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::do_acquire() {
-    if (pool_.empty()) {
-        // pool_logger().info("Bucket empty, generating new object");
-        auto entry = std::make_unique<ttl::Entry>();
-        entry->value.reserve(value_offset_);
-        entry->in_use_ = true;
-        sanc_count_++;
-        if (sieve_policy_ != nullptr) {
-            sieve_policy_->on_insert(*entry);
-        }
-        co_return entry;
-    }
+    auto entry = co_await pool_.acquire();
 
-    auto entry = std::move(pool_.front());
-    pool_.pop_front();
     entry->in_use_ = true;
     sanc_count_++;
+
     if (sieve_policy_ != nullptr) {
         sieve_policy_->on_insert(*entry);
     }
+
     co_return entry;
 }
 
 seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::do_prob_acquire() {
-    if (pool_.empty()) {
-        auto entry = std::make_unique<ttl::Entry>();
-        entry->value.reserve(value_offset_);
-        entry->in_use_ = true;
-        entry->pool_type = ttl::PoolType::Probation;
-        prob_count_++;
-        try {
-            co_await run_sequential_reaper();
-
-        } catch (...) {
-            try {
-                throw;
-            } catch (const std::exception &e) {
-                pool_logger().error("acquire reaper failed on fallback "
-                                    "path: {}, backtrace: {}",
-                                    e.what(), seastar::current_backtrace());
-            } catch (...) {
-                pool_logger().error("acquire reaper failed on fallback path: "
-                                    "unknown exception, backtrace: {}",
-                                    seastar::current_backtrace());
-            }
-            throw;
-        }
-        co_return entry;
-    }
-
     if (prob_count_ >= prob_threshold_) {
-
         try {
             co_await run_sequential_reaper();
-
         } catch (...) {
             try {
                 throw;
@@ -213,12 +154,15 @@ seastar::future<std::unique_ptr<ttl::Entry>> CacheEntryPool::do_prob_acquire() {
             throw;
         }
     }
-    auto entry = std::move(pool_.front());
-    pool_.pop_front();
+
+    auto entry = co_await pool_.acquire();
+
     entry->in_use_ = true;
     entry->pool_type = ttl::PoolType::Probation;
     prob_count_++;
+
     probation_list_.push_back(*entry);
+
     co_return entry;
 }
 
@@ -234,34 +178,15 @@ void CacheEntryPool::do_release(std::unique_ptr<ttl::Entry> entry) {
         return;
     }
 
-    entry->in_use_ = false;
-    entry->visited = false;
-    entry->value.clear();
-    entry->key = "";
-    entry->expires_at = 0;
-    entry->ver = 0;
-    entry->heat = 0;
-    entry->last_access = 0;
-    entry->pool_type = ttl::PoolType::Probation;
-
     if (sieve_policy_ != nullptr) {
-        sieve_policy_->on_erase(*entry.get());
+        sieve_policy_->on_erase(*entry);
     }
+
     if (sanc_count_ > 0) {
         sanc_count_--;
     }
 
-    if (entry->value.capacity() > value_offset_ * 2) {
-        std::string tmp;
-        tmp.reserve(value_offset_);
-        entry->value.swap(tmp);
-    }
-
-    if (pool_.size() < max_size_) {
-        pool_.push_back(std::move(entry));
-        return;
-    }
-    entry.reset();
+    pool_.release(std::move(entry));
 }
 
 void CacheEntryPool::do_prob_release(std::unique_ptr<ttl::Entry> entry) {
@@ -270,38 +195,18 @@ void CacheEntryPool::do_prob_release(std::unique_ptr<ttl::Entry> entry) {
     }
 
     if (entry->pool_type == ttl::PoolType::Probation) {
-        remove_from_probation(*entry.get());
+        remove_from_probation(*entry);
     } else {
         if (sieve_policy_ != nullptr) {
-            sieve_policy_->on_erase(*entry.get());
+            sieve_policy_->on_erase(*entry);
         }
+
         if (sanc_count_ > 0) {
             sanc_count_--;
         }
     }
 
-    entry->in_use_ = false;
-    entry->visited = false;
-    entry->value.clear();
-    entry->key = "";
-    entry->expires_at = 0;
-    entry->ver = 0;
-    entry->heat = 0;
-    entry->last_access = 0;
-    entry->pool_type = ttl::PoolType::Probation;
-
-    if (entry->value.capacity() > value_offset_ * 2) {
-        std::string tmp;
-        tmp.reserve(value_offset_);
-        entry->value.swap(tmp);
-    }
-
-    if (pool_.size() < max_size_) {
-        pool_.push_back(std::move(entry));
-        return;
-    }
-
-    entry.reset();
+    pool_.release(std::move(entry));
 }
 
 void CacheEntryPool::release(std::unique_ptr<ttl::Entry> entry) {
@@ -319,7 +224,8 @@ std::size_t CacheEntryPool::get_per_entry_size_estimate() {
 std::size_t CacheEntryPool::get_max_allowed_memory_for_pool() {
     pool_logger().info("Pool max percent {} Usable memory {}",
                        pool_max_memory_percent_, usable_memory_);
-    const std::size_t target_memory = usable_memory_ * pool_max_memory_percent_;
+    const std::size_t target_memory =
+        usable_memory_ * (pool_max_memory_percent_ / 100.0);
     return target_memory;
 }
 

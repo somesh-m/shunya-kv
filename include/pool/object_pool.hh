@@ -1,11 +1,14 @@
 #pragma once
 #include "eviction/sieve_policy.hh"
 #include "pool/pool.hh"
+#include "pool/shard_memory_manager.hh"
 #include <boost/intrusive/list.hpp>
 #include <cstddef>
 #include <dbconfig.hh>
 #include <memory>
 #include <optional>
+#include <pool/kv_entry_pool_traits.hh>
+#include <pool/object_pool_template.hh>
 #include <seastar/core/circular_buffer.hh>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/memory.hh>
@@ -30,23 +33,24 @@ using ProbationList =
 
 class CacheEntryPool {
   public:
-    explicit CacheEntryPool(std::size_t max_size = 0) : max_size_(max_size) {
+    CacheEntryPool(pool::ShardMemoryManager &memory_manager,
+                   const db_config &cfg, std::size_t initial_count,
+                   std::size_t growth_count)
+        : pool_(memory_manager, cfg, initial_count, growth_count), cfg_(cfg) {
         probation_hand_ = probation_list_.end();
     }
 
     seastar::future<>
-    init(const db_config &cfg,
-         SievePolicy &sieve_policy) { // call this after construction
+    init(SievePolicy &sieve_policy) { // call this after construction
         if (initialized_) {
             co_return;
         }
-        cfg_ = cfg;
         sieve_policy_ = &sieve_policy;
-        value_offset_ = cfg.pool.page_size_goal + cfg.pool.key_reserve;
+        value_offset_ = cfg_.pool.page_size_goal + cfg_.pool.key_reserve;
         auto stats = seastar::memory::stats();
         // Keeping 15 percent reserved for seastar overhead
-        usable_memory_ =
-            (1 - cfg_.pool.memory_reserve_percentage) * stats.total_memory();
+        usable_memory_ = (1 - (cfg_.pool.memory_reserve_percentage / 100.0)) *
+                         stats.total_memory();
         pool_max_memory_percent_ = cfg_.pool.pool_max_memory_percent;
         pool_logger().info("pool percent: {}",
                            cfg_.pool.prob_pool_size_percent);
@@ -87,7 +91,10 @@ class CacheEntryPool {
                            max_size_, reaper_budget_, prob_pool_max_size_,
                            prob_threshold_);
         initialized_ = true;
-        co_await prepopulate_pool();
+        co_await pool_.init();
+        free_after_pool_ = seastar::memory::stats().free_memory();
+        pool_logger().info("Shard Id: {}; Pool size: {} ",
+                           seastar::this_shard_id(), pool_.available());
     }
 
     seastar::future<std::unique_ptr<ttl::Entry>> acquire();
@@ -117,7 +124,7 @@ class CacheEntryPool {
     std::size_t get_prob_eviction_count() const;
 
   private:
-    seastar::circular_buffer<std::unique_ptr<ttl::Entry>> pool_;
+    ObjectPool<ttl::Entry> pool_;
     std::size_t value_offset_ = 65432;
     std::size_t free_after_pool_{0};
     double pool_max_memory_percent_ = 0.7;
@@ -130,8 +137,7 @@ class CacheEntryPool {
     uint64_t sanc_count_{0};
     bool initialized_ = false;
     std::shared_ptr<SievePolicy> policy_;
-    seastar::future<> prepopulate_pool();
-    db_config cfg_;
+    const db_config &cfg_;
     uint64_t prob_eviction_count_{0};
 
     ProbationList probation_list_;

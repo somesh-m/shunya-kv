@@ -21,7 +21,8 @@ namespace shunyakv {
 class store {
 
   public:
-    future<> start(unsigned shard_id, const db_config &cfg);
+    future<> start(unsigned shard_id, const db_config &cfg,
+                   pool::ShardMemoryManager &memory_manager);
     future<> stop();
 
     /**
@@ -66,7 +67,7 @@ class store {
     /**
      * Instance of object pool to allocate and release memory
      */
-    CacheEntryPool entry_pool_{0};
+    std::optional<CacheEntryPool> entry_pool_;
     /**
      * Instance of sieve eviction policy
      */

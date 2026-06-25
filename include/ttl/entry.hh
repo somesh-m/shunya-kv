@@ -6,6 +6,7 @@
 #include <string>
 
 class CacheEntryPool;
+template <typename T> struct PoolTraits;
 
 namespace bi = boost::intrusive;
 
@@ -68,5 +69,6 @@ struct Entry {
     bool in_use_ = false;
 
     friend class ::CacheEntryPool;
+    friend struct ::PoolTraits<Entry>;
 };
 } // namespace ttl

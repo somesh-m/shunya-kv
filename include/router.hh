@@ -4,6 +4,7 @@
 #include "router_metrics.hh"
 
 #include "hotpath_metrics.hh"
+#include "pool/shard_memory_manager.hh"
 #include "shard_stats.hh"
 #include <cstdint>
 #include <functional>
@@ -37,7 +38,11 @@ class service {
 
   private:
     future<> ensure_started();
+    // Shard Memory manager is created per shard. It manages the memory usage at
+    // each shard level
+    std::optional<pool::ShardMemoryManager> memory_manager_;
 
+    // Instantiate any other store here in the future.
     store _store;
     bool _started{false};
     request_counters _req_counters;

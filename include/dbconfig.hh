@@ -23,11 +23,11 @@ struct db_config {
     };
 
     pool::PoolConfig pool{
-        .memory_reserve_percentage = 0.15,
-        .pool_max_memory_percent = 0,
-        .page_size_goal = 0,
-        .key_reserve = 0,
-        .prob_pool_size_percent = 0,
+        .memory_reserve_percentage = 15,
+        .pool_max_memory_percent = 70,
+        .page_size_goal = 8192,
+        .key_reserve = 24,
+        .prob_pool_size_percent = 0.75,
     };
 
     uint16_t db_port{60110};

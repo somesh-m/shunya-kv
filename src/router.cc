@@ -15,8 +15,10 @@ future<> service::start(const db_config &cfg) {
     if (_started) {
         co_return;
     }
+    memory_manager_.emplace(cfg);
+
     _started = true;
-    co_return co_await _store.start(this_shard_id(), cfg);
+    co_return co_await _store.start(this_shard_id(), cfg, *memory_manager_);
 }
 
 future<> service::stop() {
