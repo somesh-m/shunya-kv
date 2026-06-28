@@ -1,46 +1,66 @@
 #include "vector/vector_store.hh"
-#include "kv_types.hh"
-#include "pool/shard_memory_manager.hh"
 
-using Clock = std::chrono::steady_clock;
-namespace shunykv {
+#include <utility>
 
-seastar::future<bool> vset(std::string_view index, std::string_view key,
-                           std::vector<float> embedding, std::string value) {
+namespace shunyakv {
+
+seastar::future<bool>
+VectorStore::vset(std::string_view index, std::string_view key,
+                  std::vector<float> embedding, std::string value,
+                  centroid_id centroid_id) {
+    if (!entry_pool_) {
+        co_return false;
+    }
+
     auto entry = co_await entry_pool_->acquire();
     if (!entry) {
-        // TODO: Handle error logging here for memory full
         co_return false;
     }
 
     entry->key = seastar::sstring(key);
-    entry->value = std::move(value);
+    entry->value = value;
+    entry->embedding = embedding;
+    entry->centroid_id = centroid_id;
 
     auto [it, inserted] = vector_index_map_.try_emplace(
         seastar::sstring(index),
-        std::make_unique<VectorIndex>({dim : embedding.size()}));
+        std::make_unique<VectorIndex>(
+            VectorIndexConfig{.dim = static_cast<uint32_t>(embedding.size())}));
+
+    it->second->upsert(seastar::sstring(key), std::move(embedding),
+                       std::move(value), centroid_id);
+
     if (!inserted) {
-        // Index already exists
-        it->second->upsert(seastar::sstring(key), embedding, std::move(value));
+        entry_pool_->release(std::move(entry));
     }
+
+    co_return true;
 }
 
-seastar::future<std::optional<seastar::sstring>>
-vsearch(std::string_view index, std::vector<float> embedding) {}
+seastar::future<std::vector<VectorSearchResult>>
+VectorStore::vsearch(std::string_view index, std::vector<float> query_embedding,
+                     uint32_t top_k, centroid_id id) {
+    const auto it = vector_index_map_.find(index);
 
-// Lifecycle methods
-seastar::future<> store::start(unsigned, const db_config &cfg,
-                               pool::ShardMemoryManager &memory_manager) {
-    vector_index_map_.reserve(27000'00);
+    if (it == vector_index_map_.end()) {
+        co_return std::vector<VectorSearchResult>{};
+    }
+
+    co_return it->second->search(query_embedding, top_k, id);
+}
+
+seastar::future<> VectorStore::start(unsigned, const db_config &cfg,
+                                     pool::ShardMemoryManager &memory_manager) {
+    vector_index_map_.reserve(2700000);
     entry_pool_.emplace(memory_manager, cfg, 1000, 200);
-    // Initialize the eviction algorithm here later
     co_return;
 }
 
-seastar::future<> store::stop() {
+seastar::future<> VectorStore::stop() {
     vector_index_map_.clear();
     vector_index_map_ = {};
+    entry_pool_.reset();
     co_return;
 }
 
-} // namespace shunykv
+} // namespace shunyakv

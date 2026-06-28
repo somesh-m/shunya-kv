@@ -10,16 +10,17 @@
 #include <seastar/core/iostream.hh>
 #include <seastar/core/smp.hh>
 #include <string>
+#include "vector/vector_types.hh
 
 static seastar::logger vset_logger{"cmd_vset"};
 
 namespace shunyakv {
 namespace {
-seastar::future<bool> vset(shunyakv::service &store, std::string_view index,
+seastar::future<bool> vset(shunyakv::service &service, std::string_view index,
                            std::string_view key, std::vector<float> embedding,
                            seastar::sstring value) {
-    return store.local_vset(std::move(index), std::move(key),
-                            std::move(embedding), std::move(value));
+    return service.local_vset(std::move(index), std::move(key),
+                              std::move(embedding), std::move(value));
 }
 } // namespace
 /**
@@ -27,10 +28,10 @@ seastar::future<bool> vset(shunyakv::service &store, std::string_view index,
  */
 seastar::future<> handle_vset(const resp::ArgView &cmd,
                               seastar::output_stream<char> &out,
-                              shunyakv::service &store) {
+                              shunyakv::service &service) {
     if (cmd.size() < 4) {
-        co_await resp::write_error(out,
-                                   "ERR wrong number of arguements for 'SET'");
+        co_await resp::write_error(
+            out, "ERR wrong number of arguements for 'V_SET'");
         co_return;
     }
 
@@ -53,7 +54,6 @@ seastar::future<> handle_vset(const resp::ArgView &cmd,
         co_await resp::write_error(out, "ERR empty embedding");
         co_return;
     }
-
-    //Figure out the shards on which to send this request
+    return vset(service, index, key, std::move(value), std::move(embedding));
 }
 } // namespace shunyakv

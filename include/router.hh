@@ -7,6 +7,7 @@
 #include "hotpath_metrics.hh"
 #include "pool/shard_memory_manager.hh"
 #include "shard_stats.hh"
+#include "vector/vector_routing.hh"
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -20,7 +21,7 @@
 using namespace seastar;
 namespace shunyakv {
 
-class service {
+class service : public seastar::peering_sharded_service<service> {
   public:
     future<> start(const db_config &cfg);
     future<> stop();
@@ -30,8 +31,8 @@ class service {
     future<std::optional<sstring>> local_get(std::string_view);
     future<bool> local_vset(std::string_view index, std::string_view key,
                             std::vector<float> embedding, std::string value);
-    future<std::optional<std::string>>
-    local_vsearch(std::string_view index, std::vector<float> query_embedding);
+    future<std::vector<VectorSearchResult>>
+    vsearch(std::string_view index, std::vector<float> query_embedding);
     void record_get(bool) noexcept;
     void record_set(bool) noexcept;
     void record_get_latency(uint64_t) noexcept;
@@ -42,6 +43,17 @@ class service {
     request_latency_counters snapshot_request_latency_counters() const noexcept;
     shard_stats_snapshot snapshot_shard_stats() const noexcept;
 
+    // Vector DB Related functions
+    future<scatter_result>
+    find_global_top_centroids(std::span<const float> query_embedding,
+                              std::string_view index);
+
+    future<std::vector<usize_t>>
+    find_vector_owner_shard(std::span<const float> embedding,
+                            std::string_view index);
+
+    future<shard_id> find_storage_shard(std::span<const float>);
+
   private:
     future<> ensure_started();
     // Shard Memory manager is created per shard. It manages the memory usage at
@@ -51,6 +63,8 @@ class service {
     // Instantiate any other store here in the future.
     store _store;
     VectorStore vector_store_;
+    // Instantiate the vdb orchestrator as well here
+    vdb::VDBOrchestrator vdb_orch_;
     bool _started{false};
     request_counters _req_counters;
     request_latency_counters _latency_counters;

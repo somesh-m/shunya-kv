@@ -8,8 +8,13 @@
 #include <utility>
 #include <vector>
 
+#include "vector/helper.hh"
+#include <algorithm>
+#include <functional>
 #include <kv_types.hh>
+#include <queue>
 #include <search_result.hh>
+#include <stdexcept>
 #include <vector_entry.hh>
 #include <vector_types.hh>
 
@@ -44,12 +49,11 @@ class VectorIndex {
         return 0;
     }
 
-    void upsert(key_t key, std::vector<float> embedding, std::string value) {
+    void upsert(key_t key, std::vector<float> embedding, std::string value,
+                centroid_id new_centroid) {
         if (!validate_dim(embedding)) {
             throw std::runtime_error("VECTOR_DIMENSION_MISMATCH");
         }
-
-        centroid_id new_centroid = choose_centroid(embedding);
 
         auto old_entry = _entries.find(key);
 
@@ -108,19 +112,65 @@ class VectorIndex {
     }
 
     std::vector<VectorSearchResult> search(const std::vector<float> &query,
-                                           uint32_t top_k) const {
+                                           uint32_t top_k,
+                                           centroid_id centroid_id) const {
         if (!validate_dim(query)) {
             throw std::runtime_error("VECTOR_DIMENSION_MISMATCH");
         }
 
-        // TODO:
-        // 1. choose nprobe centroids
-        // 2. scan member_keys inside those centroids
-        // 3. compute similarity score against _entries[key].embedding
-        // 4. keep top_k
-        // 5. return vector of {key, score}
+        if (top_k == 0) {
+            return {};
+        }
 
-        return {};
+        VectorResultQueue winners;
+
+        const auto centroid_it = _centroid_buckets.find(centroid_id);
+
+        if (centroid_it == _centroid_buckets.end()) {
+            throw std::runtime_error("INVALID_CENTROID");
+        }
+
+        // Avoid copying all member keys.
+        const auto &member_keys = centroid_it->second.member_keys;
+
+        for (const auto &key : member_keys) {
+            const auto entry_it = _entries.find(key);
+
+            // Typo fixed: _entries, not _enries.
+            if (entry_it == _entries.end()) {
+                continue;
+            }
+
+            const auto &entry = entry_it->second;
+
+            // Avoid copying the embedding.
+            const float score = find_cosine_similarity(query, entry.embedding);
+
+            winners.push(VectorSearchResult{
+                .score = score,
+                .key = std::string{key},
+                .value = entry.value,
+            });
+
+            if (winners.size() > top_k) {
+                // Min-heap: removes the lowest-scoring retained result.
+                winners.pop();
+            }
+        }
+
+        std::vector<VectorSearchResult> results;
+        results.reserve(winners.size());
+
+        // The min-heap returns the lowest retained score first.
+        while (!winners.empty()) {
+            results.push_back(winners.top());
+            winners.pop();
+        }
+
+        // Return highest similarity first.
+        std::reverse(results.begin(), results.end());
+
+        return results;
     }
 };
 

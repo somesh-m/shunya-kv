@@ -41,7 +41,8 @@ bool ascii_ieq(std::string_view a, std::string_view b) {
 
 } // namespace
 
-void RespStreamProcessor::compact_if_needed(seastar::sstring &buf, size_t &pos) {
+void RespStreamProcessor::compact_if_needed(seastar::sstring &buf,
+                                            size_t &pos) {
     if (pos == 0) {
         return;
     }
@@ -90,6 +91,7 @@ RespStreamProcessor::handle_request(shunyakv::ParsedRequest req) {
             cmd.emplace_back(arg.data(), arg.size());
         }
 
+        // Check if the command is valid or not.
         const auto &table = shunyakv::command_dispatch();
         const auto it =
             std::find_if(table.begin(), table.end(), [&](const auto &entry) {

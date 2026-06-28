@@ -4,6 +4,8 @@
 #include "cmd_node_info.hh"
 #include "cmd_quit.hh"
 #include "cmd_set.hh"
+#include "cmd_vsearch.hh"
+#include "cmd_vset.hh"
 
 namespace shunyakv {
 const std::unordered_map<std::string_view, Handler> &command_dispatch() {
@@ -13,6 +15,8 @@ const std::unordered_map<std::string_view, Handler> &command_dispatch() {
         {"QUIT", shunyakv::handle_quit},
         {"NODE_INFO", shunyakv::handle_node_info},
         {"INFO", shunyakv::handle_info},
+        {"VSET", shunyakv::handle_vset},
+        {"VSEARCH", shunyakv::handle_vsearch},
     };
     return table;
 }

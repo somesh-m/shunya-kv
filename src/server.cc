@@ -57,6 +57,7 @@ future<> tcp_server::handle_session(connected_socket s, socket_address peer,
 
             const auto &table = command_dispatch();
             auto it = table.find(cmdU);
+            // We can remove this, because the parser checks for the validity of the command anyways.
             if (it == table.end()) {
                 co_await resp::write_error(out, "ERR unknown command");
                 co_await out.flush();
@@ -98,6 +99,7 @@ seastar::future<> tcp_server::start() {
                 seastar::stop_iteration::yes);
         }
 
+        //This listener runs on each
         return listener.accept()
             .then([this](seastar::accept_result ar) {
                 auto peer = ar.remote_address;

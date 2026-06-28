@@ -93,7 +93,7 @@ class socket_server {
 
     static seastar::sstring http_date();
 
-    // Server-side helpers for connection lifecycle (strongly recommended)
+    // Server-side helpers for connection lifecycle
     void on_conn_open(connection &c);
     void on_conn_close(connection &c);
     seastar::gate &task_gate() { return _task_gate; }
