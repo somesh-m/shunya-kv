@@ -1,7 +1,7 @@
 #pragma once
 #include "dbconfig.hh"
 #include "eviction/sieve_policy.hh"
-#include "pool/vector_pool.hh"
+#include "pool/shard_memory_manager.hh"
 #include "shard_stats.hh"
 #include "vector_entry.hh"
 #include "vector_index.hh"
@@ -11,6 +11,7 @@
 #include <optional>
 #include <queue>
 #include <seastar/core/future.hh>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -33,7 +34,9 @@ class VectorStore {
 
     future<bool> vset(std::string_view index, std::string_view key,
                       std::vector<float> embedding, std::string value,
-                      centroid_id centroid_id);
+                      centroid_id centroid);
+    future<bool> vset_brute(std::string_view index, std::string_view key,
+                            std::vector<float> embedding, std::string value);
 
     /**
      * VSEARCH <index> <vector>
@@ -41,11 +44,18 @@ class VectorStore {
     future<std::vector<VectorSearchResult>>
     vsearch(std::string_view index, std::vector<float> query_embedding,
             uint32_t top_k, centroid_id id);
+    future<std::vector<VectorSearchResult>>
+    vsearch_brute(std::string_view index, std::vector<float> query_embedding,
+                  uint32_t top_k);
+
+    bool is_index_enabled() const { return index_enabled_; }
 
   private:
     absl::flat_hash_map<vector_index_t, std::unique_ptr<VectorIndex>>
         vector_index_map_;
-    std::optional<EntryPool> entry_pool_;
+    bool index_enabled_ = false; // Replicated variable
+    bool index_building_ = false;
+    uint64_t index_version_ = 0;
 };
 
 } // namespace shunyakv

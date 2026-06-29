@@ -5,6 +5,8 @@
 #include <iterator>
 #include <utility>
 
+#include <seastar/core/future-util.hh>
+
 using namespace seastar;
 namespace shunyakv {
 
@@ -31,13 +33,13 @@ fanout_search(service &coordinator, std::string_view index,
         pending.push_back(coordinator.container().invoke_on(
             target_shard,
             [index_copy = owned_index, embedding_copy = embedding,
-             centroid_ids = std::move(centroid_ids), top_k](
-                service &local_service) mutable -> future<LocalResult> {
+             centroid_ids = std::move(centroid_ids),
+             top_k](service &local_service) mutable -> future<LocalResult> {
                 LocalResult shard_candidates;
 
                 for (const centroid_id id : centroid_ids) {
                     LocalResult centroid_results =
-                        co_await local_service.vector_store_.vsearch(
+                        co_await local_service.local_vsearch(
                             index_copy, embedding_copy, top_k, id);
 
                     shard_candidates.insert(
@@ -106,23 +108,69 @@ future<> service::stop() {
     co_return;
 }
 
+future<bool> service::vset(std::string_view index, std::string_view key,
+                           std::vector<float> embedding, std::string value) {
+    co_await ensure_started();
+    if (!vector_store_.is_index_enabled()) {
+        // Index is not built yet, directly store this
+        co_return co_await vector_store_.vset_brute(
+            index, key, std::move(embedding), std::move(value));
+    }
+    const VectorPoint owner_point =
+        co_await find_vector_owner_shard(embedding, index);
+
+    if (owner_point.target_shard_id == seastar::this_shard_id()) {
+        co_return co_await local_vset(index, key, std::move(embedding),
+                                      std::move(value), owner_point.id);
+    }
+
+    std::string owned_index{index};
+    std::string owned_key{key};
+    const centroid_id owner_centroid = owner_point.id;
+
+    co_return co_await seastar::smp::submit_to(
+        owner_point.target_shard_id,
+        [index = std::move(owned_index), key = std::move(owned_key),
+         embedding = std::move(embedding), value = std::move(value),
+         owner_centroid]() mutable {
+            return shunyakv::local_service().local_vset(
+                index, key, std::move(embedding), std::move(value),
+                owner_centroid);
+        });
+}
+
 future<bool> service::local_vset(std::string_view index, std::string_view key,
                                  std::vector<float> embedding,
-                                 std::string value) {
+                                 std::string value, centroid_id centroid) {
     co_await ensure_started();
-
-    auto owner_shards = co_await find_vector_owner_shard(embedding, index);
-    (void)owner_shards;
-
-    centroid_id target_centroid = 0;
     co_return co_await vector_store_.vset(index, key, std::move(embedding),
-                                          std::move(value), target_centroid);
+                                          std::move(value), centroid);
+}
+
+future<std::vector<VectorSearchResult>>
+service::local_vsearch(std::string_view index, std::vector<float> query_embedding,
+                       uint32_t top_k, centroid_id centroid) {
+    co_await ensure_started();
+    co_return co_await vector_store_.vsearch(index, std::move(query_embedding),
+                                             top_k, centroid);
+}
+
+future<std::vector<VectorSearchResult>>
+service::local_vsearch_brute(std::string_view index,
+                             std::vector<float> query_embedding,
+                             uint32_t top_k) {
+    co_await ensure_started();
+    co_return co_await vector_store_.vsearch_brute(
+        index, std::move(query_embedding), top_k);
 }
 
 future<std::vector<VectorSearchResult>>
 service::vsearch(std::string_view index, std::vector<float> query_embedding) {
     co_await ensure_started();
-
+    if (!vector_store_.is_index_enabled()) {
+        co_return co_await local_vsearch_brute(index, std::move(query_embedding),
+                                               kDefaultVsearchTopK);
+    }
     const scatter_result top_centroids =
         co_await find_global_top_centroids(query_embedding, index);
     if (top_centroids.empty()) {
@@ -192,18 +240,42 @@ shard_stats_snapshot service::snapshot_shard_stats() const noexcept {
     return _store.snapshot_stats();
 }
 
-future<std::vector<usize_t>>
+future<VectorPoint>
 service::find_vector_owner_shard(std::span<const float> embedding,
                                  std::string_view index) {
-    (void)embedding;
-    (void)index;
-    co_return std::vector<usize_t>{};
+    /**
+     * To find the top nearest centroid, call the find_global_top_centroids with
+     * result count set as 1. find_global_top_centroids function scatters
+     * request to all the shards to find the top_k nearest centroids to an
+     * embedding.
+     */
+    scatter_result nearest_centroid =
+        co_await find_global_top_centroids(embedding, index, 1);
+
+    /**
+     * Send the write request to nearest_centroid->first shard and
+     * nearest_centroid->second centroid
+     */
+    VectorPoint result;
+    for (const auto &[target_shard, centroid_ids] : nearest_centroid) {
+        if (centroid_ids.empty()) {
+            continue;
+        }
+        result = VectorPoint{
+            .id = *centroid_ids.begin(),
+            .target_shard_id = target_shard,
+        };
+        break;
+    }
+
+    co_return result;
 }
 
 future<scatter_result>
 service::find_global_top_centroids(std::span<const float> query_embedding,
-                                   std::string_view index) {
-    const std::size_t nprobe = vdb_orch_.nprobe();
+                                   std::string_view index,
+                                   std::optional<uint32_t> result_count) {
+    const uint32_t nprobe = result_count.value_or(vdb_orch_.nprobe());
 
     if (query_embedding.empty() || nprobe == 0) {
         co_return scatter_result{};
@@ -214,22 +286,25 @@ service::find_global_top_centroids(std::span<const float> query_embedding,
         query_embedding.end(),
     };
 
-    std::vector<CentroidScore> global_winners = co_await container().map_reduce0(
-        [query = std::move(query), index](service &local_service) {
-            std::vector<float> local_query{
-                query.begin(),
-                query.end(),
-            };
-            return local_service.vdb_orch_.find_top_centroids(local_query,
-                                                              index);
-        },
-        std::vector<CentroidScore>{},
-        [](std::vector<CentroidScore> global,
-           std::vector<CentroidScore> local) mutable {
-            global.insert(global.end(), std::make_move_iterator(local.begin()),
-                          std::make_move_iterator(local.end()));
-            return global;
-        });
+    std::vector<CentroidScore> global_winners =
+        co_await container().map_reduce0(
+            [query = std::move(query), owned_index = std::string(index)](
+                service &local_service) {
+                std::vector<float> local_query{
+                    query.begin(),
+                    query.end(),
+                };
+                return local_service.vdb_orch_.find_top_centroids(local_query,
+                                                                  owned_index);
+            },
+            std::vector<CentroidScore>{},
+            [](std::vector<CentroidScore> global,
+               std::vector<CentroidScore> local) mutable {
+                global.insert(global.end(),
+                              std::make_move_iterator(local.begin()),
+                              std::make_move_iterator(local.end()));
+                return global;
+            });
 
     std::priority_queue<CentroidScore, std::vector<CentroidScore>,
                         std::greater<CentroidScore>>

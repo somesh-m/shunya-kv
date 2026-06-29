@@ -4,6 +4,6 @@
 
 namespace shunyakv {
 seastar::future<> handle_vset(const resp::ArgvView &cmd,
-                             seastar::output_stream<char> &out,
-                             shunyakv::service &svc);
-}
+                              seastar::output_stream<char> &out,
+                              shunyakv::service &svc);
+} // namespace shunyakv

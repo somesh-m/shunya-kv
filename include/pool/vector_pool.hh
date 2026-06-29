@@ -25,11 +25,11 @@ class EntryPool {
               std::size_t initial_count, std::size_t growth_count)
         : pool_(memory_manager, cfg, initial_count, growth_count), cfg_(cfg) {}
 
-    void release(std::unique_ptr<vdb::Entry> entry);
-    seastar::future<std::unique_ptr<vdb::Entry>> acquire();
+    void release(std::unique_ptr<shunyakv::vdb::Entry> entry);
+    seastar::future<std::unique_ptr<shunyakv::vdb::Entry>> acquire();
 
   private:
-    ObjectPool<vdb::Entry> pool_;
+    ObjectPool<shunyakv::vdb::Entry> pool_;
     std::size_t value_offset_ =
         65432; // Will be overwritten by the value from config
     const db_config &cfg_;

@@ -11,12 +11,12 @@
 #include "vector/helper.hh"
 #include <algorithm>
 #include <functional>
-#include <kv_types.hh>
 #include <queue>
-#include <search_result.hh>
 #include <stdexcept>
-#include <vector_entry.hh>
-#include <vector_types.hh>
+#include "kv_types.hh"
+#include "vector/search_result.hh"
+#include "vector/vector_entry.hh"
+#include "vector/vector_types.hh"
 
 namespace shunyakv {
 
@@ -49,6 +49,27 @@ class VectorIndex {
         return 0;
     }
 
+    void upsert_brute(key_t key, std::vector<float> embedding,
+                      std::string value) {
+        if (!validate_dim(embedding)) {
+            throw std::runtime_error("VECTOR_DIMENSION_MISMATCH");
+        }
+
+        auto old_entry = _entries.find(key);
+
+        if (old_entry != _entries.end()) {
+            old_entry->second.value = std::move(value);
+            old_entry->second.embedding = std::move(embedding);
+            old_entry->second.ver++;
+            return;
+        }
+
+        _entries.emplace(key, VectorEntry{
+                                  key, std::move(value), std::move(embedding),
+                                  centroid_id{0} // unused in brute-force mode
+                              });
+    }
+
     void upsert(key_t key, std::vector<float> embedding, std::string value,
                 centroid_id new_centroid) {
         if (!validate_dim(embedding)) {
@@ -58,7 +79,7 @@ class VectorIndex {
         auto old_entry = _entries.find(key);
 
         if (old_entry != _entries.end()) {
-            centroid_id old_centroid = old_entry->second.centroid_id;
+            centroid_id old_centroid = old_entry->second.centroid;
 
             if (old_centroid != new_centroid) {
                 _centroid_buckets[old_centroid].member_keys.erase(key);
@@ -69,7 +90,7 @@ class VectorIndex {
 
             old_entry->second.value = std::move(value);
             old_entry->second.embedding = std::move(embedding);
-            old_entry->second.centroid_id = new_centroid;
+            old_entry->second.centroid = new_centroid;
             old_entry->second.ver++;
 
             return;
@@ -99,7 +120,7 @@ class VectorIndex {
             return false;
         }
 
-        centroid_id centroid = entry_it->second.centroid_id;
+        centroid_id centroid = entry_it->second.centroid;
 
         auto centroid_it = _centroid_buckets.find(centroid);
         if (centroid_it != _centroid_buckets.end()) {
@@ -144,7 +165,8 @@ class VectorIndex {
             const auto &entry = entry_it->second;
 
             // Avoid copying the embedding.
-            const float score = find_cosine_similarity(query, entry.embedding);
+            const float score =
+                ::vdb::find_cosine_similarity(query, entry.embedding);
 
             winners.push(VectorSearchResult{
                 .score = score,
@@ -168,6 +190,46 @@ class VectorIndex {
         }
 
         // Return highest similarity first.
+        std::reverse(results.begin(), results.end());
+
+        return results;
+    }
+
+    std::vector<VectorSearchResult>
+    search_brute(const std::vector<float> &query, uint32_t top_k) const {
+        if (!validate_dim(query)) {
+            throw std::runtime_error("VECTOR_DIMENSION_MISMATCH");
+        }
+
+        if (top_k == 0) {
+            return {};
+        }
+
+        VectorResultQueue winners;
+
+        for (const auto &[key, entry] : _entries) {
+            const float score =
+                ::vdb::find_cosine_similarity(query, entry.embedding);
+
+            winners.push(VectorSearchResult{
+                .score = score,
+                .key = std::string{key},
+                .value = entry.value,
+            });
+
+            if (winners.size() > top_k) {
+                winners.pop();
+            }
+        }
+
+        std::vector<VectorSearchResult> results;
+        results.reserve(winners.size());
+
+        while (!winners.empty()) {
+            results.push_back(winners.top());
+            winners.pop();
+        }
+
         std::reverse(results.begin(), results.end());
 
         return results;

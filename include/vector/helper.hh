@@ -1,12 +1,51 @@
 #pragma once
 #include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
+#include <string_view>
+#include <system_error>
 #include <span>
 #include <vector>
 
 namespace vdb {
-inline float dot_product(std::span<float> a, std::span<float> b) {
+inline bool parse_embedding(std::string_view raw, std::vector<float> &out) {
+    out.clear();
+
+    std::size_t pos = 0;
+    while (pos < raw.size()) {
+        while (pos < raw.size() &&
+               (std::isspace(static_cast<unsigned char>(raw[pos])) ||
+                raw[pos] == '[' || raw[pos] == ']' || raw[pos] == ',')) {
+            ++pos;
+        }
+
+        if (pos >= raw.size()) {
+            break;
+        }
+
+        std::size_t end = pos;
+        while (end < raw.size() && raw[end] != ',' && raw[end] != ']') {
+            ++end;
+        }
+
+        float value = 0.0f;
+        const auto *begin = raw.data() + pos;
+        const auto *finish = raw.data() + end;
+        const auto [ptr, ec] = std::from_chars(begin, finish, value);
+        if (ec != std::errc{} || ptr != finish) {
+            return false;
+        }
+
+        out.push_back(value);
+        pos = end;
+    }
+
+    return !out.empty();
+}
+
+inline float dot_product(std::span<const float> a, std::span<const float> b) {
 
     if (a.size() != b.size()) {
         throw std::invalid_argument(
@@ -37,13 +76,13 @@ inline void normalize(std::span<float> a) {
         return;
     }
 
-    for (double &value : a) {
+    for (float &value : a) {
         value /= norm;
     }
 }
 
-inline double find_cosine_similarity(std::span<float> embedding_a,
-                                     std::span<float> embedding_b) {
+inline double find_cosine_similarity(std::span<const float> embedding_a,
+                                     std::span<const float> embedding_b) {
     // Assumes both embeddings are already normalized.
     return dot_product(embedding_a, embedding_b);
 }

@@ -1,4 +1,4 @@
-#include "cmd_vset.hh"
+#include "cmd_vsearch.hh"
 #include "commands.hh"
 #include "hash.hh"
 #include "router.hh"
@@ -9,54 +9,16 @@
 #include <seastar/core/future.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/smp.hh>
-#include <charconv>
-#include <cctype>
 #include <string>
-#include <string_view>
-#include <system_error>
 #include <vector>
 
+#include "vector/helper.hh"
 #include "vector/vector_types.hh"
 
 static seastar::logger vsearch_logger{"cmd_vsearch"};
 
 namespace shunyakv {
 namespace {
-
-bool parse_embedding(std::string_view raw, std::vector<float> &out) {
-    out.clear();
-
-    std::size_t pos = 0;
-    while (pos < raw.size()) {
-        while (pos < raw.size() &&
-               (std::isspace(static_cast<unsigned char>(raw[pos])) ||
-                raw[pos] == '[' || raw[pos] == ']' || raw[pos] == ',')) {
-            ++pos;
-        }
-
-        if (pos >= raw.size()) {
-            break;
-        }
-
-        std::size_t end = pos;
-        while (end < raw.size() && raw[end] != ',' && raw[end] != ']') {
-            ++end;
-        }
-
-        float value = 0.0f;
-        const auto *begin = raw.data() + pos;
-        const auto *finish = raw.data() + end;
-        const auto [ptr, ec] = std::from_chars(begin, finish, value);
-        if (ec != std::errc{} || ptr != finish) {
-            return false;
-        }
-
-        out.push_back(value);
-        pos = end;
-    }
-
-    return !out.empty();
-}
 
 seastar::future<> write_array_len(seastar::output_stream<char> &out,
                                   std::size_t len) {
@@ -83,7 +45,7 @@ seastar::future<> write_search_results(
 /**
  * VSEARCH <INDEX> <EMBEDDING>
  */
-seastar::future<> handle_vsearch(const resp::ArgView &cmd,
+seastar::future<> handle_vsearch(const resp::ArgvView &cmd,
                                  seastar::output_stream<char> &out,
                                  shunyakv::service &service) {
     if (cmd.size() < 3) {
@@ -106,7 +68,7 @@ seastar::future<> handle_vsearch(const resp::ArgView &cmd,
     }
 
     std::vector<float> embedding;
-    if (!parse_embedding(raw_embedding, embedding)) {
+    if (!::vdb::parse_embedding(raw_embedding, embedding)) {
         co_await resp::write_error(out, "ERR invalid embedding");
         co_return;
     }

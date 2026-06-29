@@ -10,26 +10,20 @@
 #include <seastar/core/iostream.hh>
 #include <seastar/core/smp.hh>
 #include <string>
-#include "vector/vector_types.hh
+
+#include "vector/helper.hh"
+#include "vector/vector_types.hh"
 
 static seastar::logger vset_logger{"cmd_vset"};
 
 namespace shunyakv {
-namespace {
-seastar::future<bool> vset(shunyakv::service &service, std::string_view index,
-                           std::string_view key, std::vector<float> embedding,
-                           seastar::sstring value) {
-    return service.local_vset(std::move(index), std::move(key),
-                              std::move(embedding), std::move(value));
-}
-} // namespace
 /**
  * VSET <KEY> <VALUE> <INDEX> <EMBEDDING>
  */
-seastar::future<> handle_vset(const resp::ArgView &cmd,
+seastar::future<> handle_vset(const resp::ArgvView &cmd,
                               seastar::output_stream<char> &out,
                               shunyakv::service &service) {
-    if (cmd.size() < 4) {
+    if (cmd.size() < 5) {
         co_await resp::write_error(
             out, "ERR wrong number of arguements for 'V_SET'");
         co_return;
@@ -38,7 +32,7 @@ seastar::future<> handle_vset(const resp::ArgView &cmd,
     const auto &key = cmd[1];
     const auto &value = cmd[2];
     const auto &index = cmd[3];
-    const auto &embedding = cmd[4];
+    const auto &raw_embedding = cmd[4];
 
     if (key.empty()) {
         co_await resp::write_error(out, "ERR empty key");
@@ -50,10 +44,24 @@ seastar::future<> handle_vset(const resp::ArgView &cmd,
         co_return;
     }
 
-    if (embedding.empty()) {
+    if (raw_embedding.empty()) {
         co_await resp::write_error(out, "ERR empty embedding");
         co_return;
     }
-    return vset(service, index, key, std::move(value), std::move(embedding));
+
+    std::vector<float> embedding;
+    if (!::vdb::parse_embedding(raw_embedding, embedding)) {
+        co_await resp::write_error(out, "ERR invalid embedding");
+        co_return;
+    }
+
+    const bool ok = co_await service.vset(index, key, std::move(embedding),
+                                          std::string(value));
+    if (ok) {
+        co_await resp::write_simple(out, "OK");
+    } else {
+        co_await resp::write_error(out, "NOT STORED");
+    }
+    co_return;
 }
 } // namespace shunyakv

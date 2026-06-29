@@ -1,19 +1,23 @@
 #pragma once
 
 #include <absl/container/flat_hash_set.h>
+#include <seastar/core/shard_id.hh>
 #include <queue>
 #include <seastar/core/sstring.hh>
 #include <seastar/core/temporary_buffer.hh>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
+
+#include "kv_types.hh"
 
 namespace shunyakv {
 
 using vector_index_t = seastar::sstring;
 using centroid_id = uint32_t;
-using scatter_result = std::unordered_map<shard_id, unordered_set<centroid_id>>;
-using VectorResultQueue =
-    std::priority_queue<VectorSearchResult, std::vector<VectorSearchResult>,
-                        std::greater<VectorSearchResult>>;
+using scatter_result =
+    std::unordered_map<seastar::shard_id, std::unordered_set<centroid_id>>;
 struct VectorSearchResult {
     float score;
     std::string key;
@@ -23,6 +27,9 @@ struct VectorSearchResult {
         return score > other.score;
     }
 };
+using VectorResultQueue =
+    std::priority_queue<VectorSearchResult, std::vector<VectorSearchResult>,
+                        std::greater<VectorSearchResult>>;
 struct CentroidBucket {
     centroid_id id = 0;
     std::vector<float> centroid_vector;
@@ -43,16 +50,21 @@ struct Centroid {
 struct CentroidScore {
     float score;
     centroid_id id;
-    shard_id target_shard_id;
+    seastar::shard_id target_shard_id;
 
     bool operator>(const CentroidScore &other) const {
         return score > other.score;
     }
 };
 
+struct VectorPoint {
+    centroid_id id;
+    seastar::shard_id target_shard_id;
+};
+
 struct CentroidTable {
     std::vector<Centroid> centroids;
-    std::unordered_map<centroid_id, shard_id> centroid_shard_mapping_;
+    std::unordered_map<centroid_id, seastar::shard_id> centroid_shard_mapping_;
     uint64_t version = 0;
 };
 } // namespace shunyakv

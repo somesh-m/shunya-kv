@@ -13,31 +13,39 @@
 
 namespace vdb {
 using centroid_id = uint32_t;
-using shard_id = uint32_t;
+using shard_id = seastar::shard_id;
 
 class VDBOrchestrator {
-    VDBOrchestrator() {}
-
   public:
+    VDBOrchestrator() = default;
+
     void add_centroid(std::vector<float> embedding, std::string_view index) {
-        centroid_id id = routing_table_.centroids.size() + 1;
-        auto cent = Centroid{id : id, embedding : std::move(embedding)};
+        auto &routing_table =
+            index_table_[shunyakv::vector_index_t(index.data(), index.size())];
+        centroid_id id = routing_table.centroids.size() + 1;
+        auto cent = shunyakv::Centroid{
+            .id = id,
+            .embedding = std::move(embedding),
+        };
         shard_id owner_id = choose_owner(cent.id);
-        routing_table_.centroid_shard_mapping_.insert(cent.id, owner_id);
-        routing_table_.centroids.push_back(std::move(cent));
+        routing_table.centroid_shard_mapping_[cent.id] = owner_id;
+        routing_table.centroids.push_back(std::move(cent));
     }
 
     std::optional<shard_id>
     find_vector_owner_shard(std::span<const float> embedding,
                             std::string_view index) {
-        if (routing_table_.centroids.empty()) {
+        const auto it =
+            index_table_.find(shunyakv::vector_index_t(index.data(), index.size()));
+        if (it == index_table_.end() || it->second.centroids.empty()) {
             return std::nullopt;
         }
 
+        const auto &routing_table = it->second;
         centroid_id nearest_centroid = 0;
         float best_score = -1.0f; // cosine range: [-1, 1]
 
-        for (const auto &centroid : routing_table_.centroids) {
+        for (const auto &centroid : routing_table.centroids) {
             float score = find_cosine_similarity(centroid.embedding, embedding);
 
             if (score > best_score) {
@@ -46,45 +54,48 @@ class VDBOrchestrator {
             }
         }
 
-        auto it = routing_table_.centroid_shard_mapping.find(nearest_centroid);
-        if (it == routing_table_.centroid_shard_mapping.end()) {
+        const auto owner_it =
+            routing_table.centroid_shard_mapping_.find(nearest_centroid);
+        if (owner_it == routing_table.centroid_shard_mapping_.end()) {
             return std::nullopt;
         }
 
-        return it->second;
+        return owner_it->second;
     }
 
-    std::vector<CentroidScore>
+    std::vector<shunyakv::CentroidScore>
     find_top_centroids(std::span<const float> query_embedding,
                        std::string_view index) {
-        std::vector<CentroidScore> result = {};
-        if (routing_table_.centroids.empty()) {
+        std::vector<shunyakv::CentroidScore> result;
+        auto it =
+            index_table_.find(shunyakv::vector_index_t(index.data(), index.size()));
+
+        if (it == index_table_.end()) {
             return result;
         }
 
-        auto it = index_table_.find(index);
+        const auto &routing_table = it->second;
 
-        if (it == index_table_.end()) {
-            return std::nullopt;
-        }
-
-        auto &routing_table = it->second;
-
-        std::priority_queue<CentroidScore, std::vector<CentroidScore>,
-                            std::greater<CentroidScore>>
+        std::priority_queue<shunyakv::CentroidScore,
+                            std::vector<shunyakv::CentroidScore>,
+                            std::greater<shunyakv::CentroidScore>>
             winning_centroids;
 
-        for (uint32_t i = 0; i < routing_table.centroids.size(); i++) {
-            const auto &centroid = routing_table.centroids[i];
+        for (const auto &centroid : routing_table.centroids) {
+            const auto owner_it =
+                routing_table.centroid_shard_mapping_.find(centroid.id);
+            if (owner_it == routing_table.centroid_shard_mapping_.end()) {
+                continue;
+            }
 
             float score =
                 find_cosine_similarity(centroid.embedding, query_embedding);
 
-            winning_centroids.push(CentroidScore{
+            winning_centroids.push(shunyakv::CentroidScore{
                 .score = score,
                 .id = centroid.id,
-                .target_shard_id =
-                    routing_table.centroid_shard_mapping_.find(item.id)});
+                .target_shard_id = owner_it->second,
+            });
 
             if (winning_centroids.size() > nprobe_) {
                 winning_centroids.pop();
@@ -103,14 +114,14 @@ class VDBOrchestrator {
         return result;
     }
 
-    size_t nprobe() { return nprobe_; }
+    size_t nprobe() const { return nprobe_; }
 
   private:
-    std::unordered_map<vector_index_t, CentroidTable> index_table_;
-    uint32_t current_id;
+    std::unordered_map<shunyakv::vector_index_t, shunyakv::CentroidTable>
+        index_table_;
     size_t nprobe_ = 5;
 
-    shard_id choose_owner(vdb::centroid_id id) {
+    static shard_id choose_owner(centroid_id id) {
         return id % seastar::smp::count;
     }
 };

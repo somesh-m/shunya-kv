@@ -6,14 +6,14 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include <vector_types.hh>
+#include "vector/vector_types.hh"
 
 class EntryPool;
 
 namespace bi = boost::intrusive;
 
-namespace shunyakv::vdb {
-struct Entry {
+namespace shunyakv {
+struct VectorEntry {
     std::string value;
 
     seastar::sstring key;
@@ -23,20 +23,21 @@ struct Entry {
     bool visited = false;
 
     std::vector<float> embedding;
-    centroid_id centroid_id = 0;
+    shunyakv::centroid_id centroid = 0;
 
     // Implement the eviction later once the service is separated
 
   public:
     bool is_in_use() const noexcept { return in_use_; }
-    Entry(seastar::sstring key, std::string value, std::vector<float> embedding,
-          centroid_id centroid_id)
+    VectorEntry(seastar::sstring key, std::string value,
+                std::vector<float> embedding, shunyakv::centroid_id centroid_id)
         : key(std::move(key)), value(std::move(value)),
-          embedding(std::move(embedding)), centroid_id(centroid_id) {}
+          embedding(std::move(embedding)), centroid(centroid_id) {}
 
-  private:
     bool in_use_ = false;
-
-    friend class EntryPool;
 };
+} // namespace shunyakv
+
+namespace shunyakv::vdb {
+using Entry = ::shunyakv::VectorEntry;
 } // namespace shunyakv::vdb
