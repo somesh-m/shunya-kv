@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <seastar/core/abort_source.hh>
 #include <seastar/core/future.hh>
 #include <seastar/core/sharded.hh>
 #include <seastar/core/smp.hh>
@@ -54,17 +55,20 @@ class service : public seastar::peering_sharded_service<service> {
     shard_stats_snapshot snapshot_shard_stats() const noexcept;
 
     // Vector DB Related functions
-    future<scatter_result>
-    find_global_top_centroids(std::span<const float> query_embedding,
-                              std::string_view index,
-                              std::optional<uint32_t> result_count =
-                                  std::nullopt);
+    future<scatter_result> find_global_top_centroids(
+        std::span<const float> query_embedding, std::string_view index,
+        std::optional<uint32_t> result_count = std::nullopt);
 
     future<VectorPoint>
     find_vector_owner_shard(std::span<const float> embedding,
                             std::string_view index);
 
     future<shard_id> find_storage_shard(std::span<const float>);
+
+    seastar::future<std::size_t> fetch_vector_entry_count();
+    seastar::future<> bg_count_checker();
+    future<> publish_routing_snapshots(
+        std::vector<LocalCentroidSnapshot> snapshots);
 
   private:
     future<> ensure_started();
@@ -78,6 +82,8 @@ class service : public seastar::peering_sharded_service<service> {
     // Instantiate the vdb orchestrator as well here
     ::vdb::VDBOrchestrator vdb_orch_;
     bool _started{false};
+    seastar::abort_source _index_build_as;
+    std::optional<future<>> _index_build_task;
     request_counters _req_counters;
     request_latency_counters _latency_counters;
 };

@@ -12,7 +12,8 @@ seastar::future<bool> VectorStore::vset(std::string_view index,
     auto [it, inserted] = vector_index_map_.try_emplace(
         seastar::sstring(index),
         std::make_unique<VectorIndex>(
-            VectorIndexConfig{.dim = static_cast<uint32_t>(embedding.size())}));
+            VectorIndexConfig{.dim = static_cast<uint32_t>(embedding.size())},
+            seastar::sstring(index)));
 
     it->second->upsert(seastar::sstring(key), std::move(embedding),
                        std::move(value), centroid);
@@ -27,7 +28,8 @@ seastar::future<bool> VectorStore::vset_brute(std::string_view index,
     auto [it, inserted] = vector_index_map_.try_emplace(
         seastar::sstring(index),
         std::make_unique<VectorIndex>(
-            VectorIndexConfig{.dim = static_cast<uint32_t>(embedding.size())}));
+            VectorIndexConfig{.dim = static_cast<uint32_t>(embedding.size())},
+            seastar::sstring(index)));
 
     it->second->upsert_brute(seastar::sstring(key), std::move(embedding),
                              std::move(value));
@@ -69,6 +71,39 @@ seastar::future<> VectorStore::stop() {
     vector_index_map_.clear();
     vector_index_map_ = {};
     co_return;
+}
+
+// Indexing related functions
+seastar::future<std::vector<LocalCentroidSnapshot>>
+VectorStore::build_local_index() {
+    // This needs to be done per index
+    index_building_ = true;
+    std::vector<LocalCentroidSnapshot> snapshots;
+    snapshots.reserve(vector_index_map_.size());
+    for (const auto &[key, entry] : vector_index_map_) {
+        auto snapshot = co_await entry->build_local_index(centroid_group_count_);
+        if (snapshot) {
+            snapshots.push_back(std::move(*snapshot));
+        }
+    }
+
+    /** Increment the centroid group count.
+     * Change to increase or decrease based on the number of keys increased or
+     * removed
+     */
+    centroid_group_count_ *= 5;
+    index_enabled_ = true;
+    index_building_ = false;
+    index_version_ += 1;
+    co_return snapshots;
+}
+
+std::size_t VectorStore::local_entry_count() const {
+    std::size_t local_count = 0;
+    for (const auto &[index, entry] : vector_index_map_) {
+        local_count += entry->total_entry_count();
+    }
+    return local_count;
 }
 
 } // namespace shunyakv

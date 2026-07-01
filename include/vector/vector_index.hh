@@ -8,27 +8,31 @@
 #include <utility>
 #include <vector>
 
-#include "vector/helper.hh"
-#include <algorithm>
-#include <functional>
-#include <queue>
-#include <stdexcept>
 #include "kv_types.hh"
+#include "vector/helper.hh"
 #include "vector/search_result.hh"
 #include "vector/vector_entry.hh"
 #include "vector/vector_types.hh"
+#include <algorithm>
+#include <functional>
+#include <queue>
+#include <random>
+#include <stdexcept>
 
 namespace shunyakv {
 
 class VectorIndex {
   private:
     VectorIndexConfig _config;
+    seastar::sstring index_;
+    uint32_t version_ = 0;
 
     absl::flat_hash_map<key_t, VectorEntry> _entries;
     absl::flat_hash_map<centroid_id, CentroidBucket> _centroid_buckets;
 
   public:
-    explicit VectorIndex(VectorIndexConfig config) : _config(config) {}
+    explicit VectorIndex(VectorIndexConfig config, seastar::sstring index)
+        : _config(config), index_(index) {}
 
     const VectorIndexConfig &config() const { return _config; }
 
@@ -36,10 +40,42 @@ class VectorIndex {
         return _entries.find(key) != _entries.end();
     }
 
-    size_t size() const { return _entries.size(); }
+    std::size_t size() const { return _entries.size(); }
+
+    std::vector<std::vector<float>> sample_random_vectors(size_t k) const {
+        std::vector<std::vector<float>> samples;
+        samples.reserve(k);
+
+        std::mt19937_64 rng{std::random_device{}()};
+
+        size_t seen = 0;
+
+        for (const auto &[key, entry] : _entries) {
+            ++seen;
+
+            if (samples.size() < k) {
+                samples.push_back(entry.embedding);
+                continue;
+            }
+
+            std::uniform_int_distribution<size_t> dist(0, seen - 1);
+            size_t j = dist(rng);
+
+            if (j < k) {
+                samples[j] = entry.embedding;
+            }
+        }
+
+        return samples;
+    }
 
     bool validate_dim(const std::vector<float> &embedding) const {
         return embedding.size() == _config.dim;
+    }
+
+    std::size_t total_entry_count() const { return _entries.size(); }
+    std::size_t total_centroid_count() const {
+        return _centroid_buckets.size();
     }
 
     centroid_id choose_centroid(const std::vector<float> &embedding) const {
@@ -234,6 +270,148 @@ class VectorIndex {
 
         return results;
     }
+
+    seastar::future<std::optional<LocalCentroidSnapshot>>
+    build_local_index(uint32_t centroid_group_count) {
+        absl::flat_hash_map<centroid_id, CentroidBucket> centroid_bucket;
+
+        std::vector<std::vector<float>> inter_centroids =
+            sample_random_vectors(centroid_group_count);
+
+        if (inter_centroids.empty()) {
+            co_return std::nullopt;
+        }
+
+        for (uint32_t i = 0; i < inter_centroids.size(); i++) {
+            centroid_bucket[i] = CentroidBucket{
+                .id = i,
+                .centroid_vector = inter_centroids[i],
+            };
+        }
+
+        // Hardcoding dimension, we need to make this constant at an index level
+        // based on the first entry in that index.
+        uint32_t dim = inter_centroids[0].size();
+
+        // Hardcoded 10 iterations of centroid rebuilding for now
+        for (uint32_t i = 0; i < 10; i++) {
+            for (auto &[id, bucket] : centroid_bucket) {
+                bucket.member_keys.clear();
+            }
+
+            // Assign vectors to their nearest centroids
+            for (const auto &[key, entry] : _entries) {
+                float max_score = -1.0f;
+                uint32_t max_score_index = 0;
+
+                for (uint32_t centroid_id = 0;
+                     centroid_id < inter_centroids.size(); centroid_id++) {
+                    const float score = ::vdb::find_cosine_similarity(
+                        entry.embedding, inter_centroids[centroid_id]);
+
+                    if (score > max_score) {
+                        max_score_index = centroid_id;
+                        max_score = score;
+                    }
+                }
+
+                centroid_bucket[max_score_index].member_keys.insert(key);
+            }
+
+            // Recompute centroids
+            for (uint32_t centroid_id = 0; centroid_id < centroid_group_count;
+                 centroid_id++) {
+                auto it = centroid_bucket.find(centroid_id);
+                if (it == centroid_bucket.end()) {
+                    continue;
+                }
+
+                uint32_t member_key_count = it->second.member_keys.size();
+                if (member_key_count == 0) {
+                    continue;
+                }
+
+                std::vector<float> new_centroid(dim, 0.0f);
+
+                for (const auto &key : it->second.member_keys) {
+                    auto entry_it = _entries.find(key);
+                    if (entry_it == _entries.end()) {
+                        continue;
+                    }
+
+                    const auto &current_vector = entry_it->second.embedding;
+
+                    for (uint32_t d = 0; d < dim; d++) {
+                        new_centroid[d] += current_vector[d];
+                    }
+                }
+
+                for (uint32_t d = 0; d < dim; d++) {
+                    new_centroid[d] /= member_key_count;
+                }
+
+                ::vdb::normalize(new_centroid);
+
+                inter_centroids[centroid_id] = new_centroid;
+                it->second.centroid_vector = new_centroid;
+            }
+        }
+
+        _centroid_buckets = std::move(centroid_bucket);
+        /**
+         * Vector Entry contains centroid information as well, we need to
+         * update that too. This mapping is needed for certain use cases like
+         * Delete a key
+         * In case of update if the entry changes the centroid
+         **/
+        for (const auto &[centroid_id, bucket] : _centroid_buckets) {
+            for (const auto &key : bucket.member_keys) {
+                auto entry_it = _entries.find(key);
+                if (entry_it == _entries.end()) {
+                    continue;
+                }
+
+                entry_it->second.centroid = centroid_id;
+            }
+        }
+        version_++;
+        co_return export_centroid_snapshot();
+    }
+
+    bool has_trained_centroids() const { return !_centroid_buckets.empty(); }
+
+    uint64_t centroid_version() const { return version_; }
+
+    std::optional<LocalCentroidSnapshot> export_centroid_snapshot() const {
+        if (_centroid_buckets.empty()) {
+            return std::nullopt;
+        }
+
+        std::vector<Centroid> centroids;
+        centroids.reserve(_centroid_buckets.size());
+
+        const seastar::shard_id shard_id = seastar::this_shard_id();
+
+        for (const auto &[key, entry] : _centroid_buckets) {
+            centroids.push_back(Centroid{
+                .id =
+                    GlobalCentroidId{
+                        .shard_id = shard_id,
+                        .local_centroid_id = key,
+                    },
+                .embedding = entry.centroid_vector,
+            });
+        }
+
+        return LocalCentroidSnapshot{
+            .index = index_,
+            .version = version_,
+            .dim = _config.dim,
+            .centroids = std::move(centroids),
+        };
+    }
+
+    uint32_t dim() const { return _config.dim; }
 };
 
 } // namespace shunyakv

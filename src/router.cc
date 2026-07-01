@@ -2,10 +2,12 @@
 #include "router.hh"
 
 #include <algorithm>
+#include <chrono>
 #include <iterator>
 #include <utility>
 
 #include <seastar/core/future-util.hh>
+#include <seastar/core/sleep.hh>
 
 using namespace seastar;
 namespace shunyakv {
@@ -30,16 +32,16 @@ fanout_search(service &coordinator, std::string_view index,
     pending.reserve(top_centroids.size());
 
     for (auto &[target_shard, centroid_ids] : top_centroids) {
-        pending.push_back(coordinator.container().invoke_on(
+        pending.push_back(seastar::smp::submit_to(
             target_shard,
             [index_copy = owned_index, embedding_copy = embedding,
              centroid_ids = std::move(centroid_ids),
-             top_k](service &local_service) mutable -> future<LocalResult> {
+             top_k]() mutable -> future<LocalResult> {
                 LocalResult shard_candidates;
 
                 for (const centroid_id id : centroid_ids) {
                     LocalResult centroid_results =
-                        co_await local_service.local_vsearch(
+                        co_await shunyakv::local_service().local_vsearch(
                             index_copy, embedding_copy, top_k, id);
 
                     shard_candidates.insert(
@@ -78,6 +80,93 @@ fanout_search(service &coordinator, std::string_view index,
 
 } // namespace
 
+future<std::size_t> service::fetch_vector_entry_count() {
+    std::vector<future<std::size_t>> pending;
+    pending.reserve(seastar::smp::count);
+
+    for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
+        pending.push_back(seastar::smp::submit_to(shard, [] {
+            return shunyakv::local_service().vector_store_.local_entry_count();
+        }));
+    }
+
+    auto shard_totals =
+        co_await seastar::when_all_succeed(pending.begin(), pending.end());
+
+    std::size_t global_total = 0;
+    for (std::size_t local_total : shard_totals) {
+        global_total += local_total;
+    }
+
+    co_return global_total;
+}
+
+future<> service::publish_routing_snapshots(
+    std::vector<LocalCentroidSnapshot> snapshots) {
+    if (snapshots.empty()) {
+        co_return;
+    }
+
+    std::vector<future<>> pending;
+    pending.reserve(seastar::smp::count);
+
+    for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
+        pending.push_back(seastar::smp::submit_to(
+            shard, [snapshots = snapshots]() mutable {
+                auto &local_service = shunyakv::local_service();
+
+                for (const auto &snapshot : snapshots) {
+                    local_service.vdb_orch_.replace_index_centroids(snapshot);
+                }
+
+                return seastar::make_ready_future<>();
+            }));
+    }
+
+    co_await seastar::when_all_succeed(pending.begin(), pending.end());
+}
+
+future<> service::bg_count_checker() {
+    try {
+        while (true) {
+            co_await seastar::sleep_abortable(std::chrono::seconds(30),
+                                              _index_build_as);
+
+            const auto count = co_await fetch_vector_entry_count();
+            if (count < 10 * seastar::smp::count) {
+                continue;
+            }
+
+            std::vector<future<std::vector<LocalCentroidSnapshot>>> pending;
+            pending.reserve(seastar::smp::count);
+
+            for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
+                pending.push_back(seastar::smp::submit_to(shard, [] {
+                    return shunyakv::local_service().vector_store_
+                        .build_local_index();
+                }));
+            }
+
+            auto local_snapshots =
+                co_await seastar::when_all_succeed(pending.begin(),
+                                                   pending.end());
+
+            std::vector<LocalCentroidSnapshot> snapshots_to_publish;
+            for (auto &snapshot_group : local_snapshots) {
+                snapshots_to_publish.insert(
+                    snapshots_to_publish.end(),
+                    std::make_move_iterator(snapshot_group.begin()),
+                    std::make_move_iterator(snapshot_group.end()));
+            }
+
+            co_await publish_routing_snapshots(std::move(snapshots_to_publish));
+            co_return;
+        }
+    } catch (const seastar::abort_requested_exception &) {
+        co_return;
+    }
+}
+
 future<> service::ensure_started() {
     if (_started) {
         co_return;
@@ -94,6 +183,7 @@ future<> service::start(const db_config &cfg) {
 
     co_await vector_store_.start(this_shard_id(), cfg, *memory_manager_);
     co_await _store.start(this_shard_id(), cfg, *memory_manager_);
+    _index_build_task.emplace(bg_count_checker());
     _started = true;
     co_return;
 }
@@ -101,6 +191,14 @@ future<> service::start(const db_config &cfg) {
 future<> service::stop() {
     if (!_started) {
         co_return;
+    }
+    _index_build_as.request_abort();
+    if (_index_build_task && _index_build_task->available()) {
+        co_await std::move(*_index_build_task);
+        _index_build_task.reset();
+    } else if (_index_build_task) {
+        co_await std::move(*_index_build_task);
+        _index_build_task.reset();
     }
     co_await vector_store_.stop();
     co_await _store.stop();
@@ -148,8 +246,9 @@ future<bool> service::local_vset(std::string_view index, std::string_view key,
 }
 
 future<std::vector<VectorSearchResult>>
-service::local_vsearch(std::string_view index, std::vector<float> query_embedding,
-                       uint32_t top_k, centroid_id centroid) {
+service::local_vsearch(std::string_view index,
+                       std::vector<float> query_embedding, uint32_t top_k,
+                       centroid_id centroid) {
     co_await ensure_started();
     co_return co_await vector_store_.vsearch(index, std::move(query_embedding),
                                              top_k, centroid);
@@ -168,8 +267,8 @@ future<std::vector<VectorSearchResult>>
 service::vsearch(std::string_view index, std::vector<float> query_embedding) {
     co_await ensure_started();
     if (!vector_store_.is_index_enabled()) {
-        co_return co_await local_vsearch_brute(index, std::move(query_embedding),
-                                               kDefaultVsearchTopK);
+        co_return co_await local_vsearch_brute(
+            index, std::move(query_embedding), kDefaultVsearchTopK);
     }
     const scatter_result top_centroids =
         co_await find_global_top_centroids(query_embedding, index);
@@ -286,25 +385,26 @@ service::find_global_top_centroids(std::span<const float> query_embedding,
         query_embedding.end(),
     };
 
-    std::vector<CentroidScore> global_winners =
-        co_await container().map_reduce0(
-            [query = std::move(query), owned_index = std::string(index)](
-                service &local_service) {
-                std::vector<float> local_query{
-                    query.begin(),
-                    query.end(),
-                };
-                return local_service.vdb_orch_.find_top_centroids(local_query,
-                                                                  owned_index);
-            },
-            std::vector<CentroidScore>{},
-            [](std::vector<CentroidScore> global,
-               std::vector<CentroidScore> local) mutable {
-                global.insert(global.end(),
-                              std::make_move_iterator(local.begin()),
-                              std::make_move_iterator(local.end()));
-                return global;
-            });
+    std::vector<future<std::vector<CentroidScore>>> pending;
+    pending.reserve(seastar::smp::count);
+
+    for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
+        pending.push_back(seastar::smp::submit_to(
+            shard, [query, owned_index = std::string(index)]() mutable {
+                return shunyakv::local_service().vdb_orch_.find_top_centroids(
+                    query, owned_index);
+            }));
+    }
+
+    auto local_winners =
+        co_await seastar::when_all_succeed(pending.begin(), pending.end());
+
+    std::vector<CentroidScore> global_winners;
+    for (auto &winner_group : local_winners) {
+        global_winners.insert(global_winners.end(),
+                              std::make_move_iterator(winner_group.begin()),
+                              std::make_move_iterator(winner_group.end()));
+    }
 
     std::priority_queue<CentroidScore, std::vector<CentroidScore>,
                         std::greater<CentroidScore>>

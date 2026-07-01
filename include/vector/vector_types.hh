@@ -1,8 +1,8 @@
 #pragma once
 
 #include <absl/container/flat_hash_set.h>
-#include <seastar/core/shard_id.hh>
 #include <queue>
+#include <seastar/core/shard_id.hh>
 #include <seastar/core/sstring.hh>
 #include <seastar/core/temporary_buffer.hh>
 #include <string>
@@ -18,6 +18,23 @@ using vector_index_t = seastar::sstring;
 using centroid_id = uint32_t;
 using scatter_result =
     std::unordered_map<seastar::shard_id, std::unordered_set<centroid_id>>;
+struct GlobalCentroidId {
+    seastar::shard_id shard_id;
+    centroid_id local_centroid_id;
+
+    bool operator==(const GlobalCentroidId &other) const noexcept {
+        return shard_id == other.shard_id &&
+               local_centroid_id == other.local_centroid_id;
+    }
+};
+
+struct GlobalCentroidIdHash {
+    std::size_t operator()(const GlobalCentroidId &id) const noexcept {
+        return std::hash<seastar::shard_id>{}(id.shard_id) ^
+               (std::hash<centroid_id>{}(id.local_centroid_id) << 1);
+    }
+};
+
 struct VectorSearchResult {
     float score;
     std::string key;
@@ -43,7 +60,7 @@ struct VectorIndexConfig {
     distance_metric metric = distance_metric::cosine;
 };
 struct Centroid {
-    centroid_id id;
+    GlobalCentroidId id;
     std::vector<float> embedding;
 };
 
@@ -64,7 +81,14 @@ struct VectorPoint {
 
 struct CentroidTable {
     std::vector<Centroid> centroids;
-    std::unordered_map<centroid_id, seastar::shard_id> centroid_shard_mapping_;
-    uint64_t version = 0;
+    uint64_t routing_version = 0;
+    std::unordered_map<seastar::shard_id, uint64_t> shard_snapshot_versions;
+};
+
+struct LocalCentroidSnapshot {
+    vector_index_t index;
+    uint64_t version;
+    uint32_t dim;
+    std::vector<Centroid> centroids;
 };
 } // namespace shunyakv
