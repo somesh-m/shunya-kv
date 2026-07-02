@@ -72,6 +72,7 @@ seastar::future<> handle_vsearch(const resp::ArgvView &cmd,
         co_await resp::write_error(out, "ERR invalid embedding");
         co_return;
     }
+    ::vdb::normalize(embedding);
 
     auto results = co_await service.vsearch(index, std::move(embedding));
     if (results.empty()) {

@@ -4,6 +4,7 @@
 #include "cmd_node_info.hh"
 #include "cmd_quit.hh"
 #include "cmd_set.hh"
+#include "cmd_vget.hh"
 #include "cmd_vsearch.hh"
 #include "cmd_vset.hh"
 
@@ -17,6 +18,7 @@ const std::unordered_map<std::string_view, Handler> &command_dispatch() {
         {"INFO", shunyakv::handle_info},
         {"VSET", shunyakv::handle_vset},
         {"VSEARCH", shunyakv::handle_vsearch},
+        {"VGET", shunyakv::handle_vget},
     };
     return table;
 }

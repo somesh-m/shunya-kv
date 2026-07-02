@@ -206,6 +206,36 @@ future<> service::stop() {
     co_return;
 }
 
+future<std::optional<sstring>> service::vget(std::string_view key,
+                                             std::string_view index) {
+    co_await ensure_started();
+    std::string owned_index{index};
+    std::string owned_key{key};
+
+    std::vector<future<std::optional<sstring>>> pending;
+    pending.reserve(seastar::smp::count);
+
+    for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
+        pending.push_back(seastar::smp::submit_to(
+            shard,
+            [index_copy = owned_index, key_copy = owned_key]() mutable {
+                return shunyakv::local_service().local_vget(key_copy,
+                                                            index_copy);
+            }));
+    }
+
+    auto shard_results =
+        co_await when_all_succeed(pending.begin(), pending.end());
+
+    for (auto &result : shard_results) {
+        if (result) {
+            co_return std::move(result);
+        }
+    }
+
+    co_return std::nullopt;
+}
+
 future<bool> service::vset(std::string_view index, std::string_view key,
                            std::vector<float> embedding, std::string value) {
     co_await ensure_started();
@@ -296,6 +326,12 @@ future<bool> service::local_set(std::string_view key, sstring value,
 future<std::optional<sstring>> service::local_get(std::string_view key) {
     co_await ensure_started();
     co_return co_await _store.get(key);
+}
+
+future<std::optional<sstring>> service::local_vget(std::string_view key,
+                                                   std::string_view index) {
+    co_await ensure_started();
+    co_return co_await vector_store_.vget(index, key);
 }
 
 void service::record_set(bool forwarded) noexcept {

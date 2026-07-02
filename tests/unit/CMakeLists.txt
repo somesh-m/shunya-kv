@@ -117,6 +117,45 @@ add_test(NAME GET_TEST_TTL_VALID
   COMMAND cmd_get_unit_test --run_test=GET_TEST_TTL_VALID
 )
 
+add_executable(cmd_vset_vsearch_unit_test
+  cmd_vset_vsearch_test.cc
+  ${SHUNYA_SRC_DIR}/cmd_vset.cc
+  ${SHUNYA_SRC_DIR}/cmd_vsearch.cc
+  ${SHUNYA_SRC_DIR}/cmd_vget.cc
+  ${SHUNYA_SRC_DIR}/router.cc
+  ${SHUNYA_SRC_DIR}/kv_store.cc
+  ${SHUNYA_SRC_DIR}/vector/vector_store.cc
+  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
+  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
+)
+
+target_include_directories(cmd_vset_vsearch_unit_test PRIVATE
+  ${SHUNYA_INCLUDE_DIR}
+  ${SHUNYA_SRC_DIR}
+  ${CMAKE_SOURCE_DIR}/third_party/fnv
+)
+
+target_link_libraries(cmd_vset_vsearch_unit_test PRIVATE
+  Seastar::seastar_testing
+  fmt::fmt
+  absl::flat_hash_map
+  fnv_ref
+)
+
+target_compile_definitions(cmd_vset_vsearch_unit_test PRIVATE
+  SEASTAR_TESTING_MAIN
+)
+
+add_test(NAME VECTOR_VGET_TEST_NO_INDEX
+  COMMAND cmd_vset_vsearch_unit_test --run_test=VECTOR_VGET_TEST_NO_INDEX
+)
+
+add_test(NAME VECTOR_TEST_NO_INDEX_EXACT_MATCH
+  COMMAND cmd_vset_vsearch_unit_test --run_test=VECTOR_TEST_NO_INDEX_EXACT_MATCH
+)
+
+
 add_executable(cmd_node_info_unit_test
   cmd_node_info_test.cc
   ${SHUNYA_SRC_DIR}/cmd_node_info.cc
@@ -253,6 +292,7 @@ add_executable(orchestrator_unit_test
   ${SHUNYA_SRC_DIR}/resp/resp_stream_processor.cc
   ${SHUNYA_SRC_DIR}/commands.cc
   ${SHUNYA_SRC_DIR}/cmd_set.cc
+  ${SHUNYA_SRC_DIR}/cmd_vget.cc
   ${SHUNYA_SRC_DIR}/cmd_vset.cc
   ${SHUNYA_SRC_DIR}/cmd_vsearch.cc
   ${SHUNYA_SRC_DIR}/cmd_get.cc
@@ -342,6 +382,7 @@ add_executable(resp_handler_unit_test
   ${SHUNYA_SRC_DIR}/resp/resp_stream_processor.cc
   ${SHUNYA_SRC_DIR}/commands.cc
   ${SHUNYA_SRC_DIR}/cmd_set.cc
+  ${SHUNYA_SRC_DIR}/cmd_vget.cc
   ${SHUNYA_SRC_DIR}/cmd_vset.cc
   ${SHUNYA_SRC_DIR}/cmd_vsearch.cc
   ${SHUNYA_SRC_DIR}/cmd_get.cc

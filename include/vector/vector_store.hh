@@ -37,6 +37,8 @@ class VectorStore {
                       centroid_id centroid);
     future<bool> vset_brute(std::string_view index, std::string_view key,
                             std::vector<float> embedding, std::string value);
+    future<std::optional<sstring>> vget(std::string_view index,
+                                        std::string_view key);
 
     /**
      * VSEARCH <index> <vector>

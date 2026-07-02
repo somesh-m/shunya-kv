@@ -37,6 +37,22 @@ seastar::future<bool> VectorStore::vset_brute(std::string_view index,
     co_return true;
 }
 
+seastar::future<std::optional<sstring>>
+VectorStore::vget(std::string_view index, std::string_view key) {
+    const auto index_it = vector_index_map_.find(seastar::sstring(index));
+
+    if (index_it == vector_index_map_.end()) {
+        co_return std::nullopt;
+    }
+
+    const auto *entry = index_it->second->get(seastar::sstring(key));
+    if (entry == nullptr) {
+        co_return std::nullopt;
+    }
+
+    co_return sstring(entry->value);
+}
+
 seastar::future<std::vector<VectorSearchResult>>
 VectorStore::vsearch(std::string_view index, std::vector<float> query_embedding,
                      uint32_t top_k, centroid_id id) {

@@ -54,6 +54,7 @@ seastar::future<> handle_vset(const resp::ArgvView &cmd,
         co_await resp::write_error(out, "ERR invalid embedding");
         co_return;
     }
+    ::vdb::normalize(embedding);
 
     const bool ok = co_await service.vset(index, key, std::move(embedding),
                                           std::string(value));
