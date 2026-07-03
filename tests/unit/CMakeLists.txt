@@ -119,6 +119,7 @@ add_test(NAME GET_TEST_TTL_VALID
 
 add_executable(cmd_vset_vsearch_unit_test
   cmd_vset_vsearch_test.cc
+  ${SHUNYA_SRC_DIR}/cmd_info.cc
   ${SHUNYA_SRC_DIR}/cmd_vset.cc
   ${SHUNYA_SRC_DIR}/cmd_vsearch.cc
   ${SHUNYA_SRC_DIR}/cmd_vget.cc
@@ -153,6 +154,10 @@ add_test(NAME VECTOR_VGET_TEST_NO_INDEX
 
 add_test(NAME VECTOR_TEST_NO_INDEX_EXACT_MATCH
   COMMAND cmd_vset_vsearch_unit_test --run_test=VECTOR_TEST_NO_INDEX_EXACT_MATCH
+)
+
+add_test(NAME VECTOR_TEST_INDEX_BUILD
+  COMMAND cmd_vset_vsearch_unit_test --run_test=VECTOR_TEST_INDEX_BUILD
 )
 
 

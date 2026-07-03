@@ -56,6 +56,7 @@ class service : public seastar::peering_sharded_service<service> {
     request_counters snapshot_request_counters() const noexcept;
     request_latency_counters snapshot_request_latency_counters() const noexcept;
     shard_stats_snapshot snapshot_shard_stats() const noexcept;
+    VectorStoreInfoSnapshot snapshot_vector_store_info() const;
 
     // Vector DB Related functions
     future<scatter_result> find_global_top_centroids(

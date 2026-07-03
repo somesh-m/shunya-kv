@@ -17,6 +17,7 @@
 #include <functional>
 #include <queue>
 #include <random>
+#include <seastar/coroutine/maybe_yield.hh>
 #include <stdexcept>
 
 namespace shunyakv {
@@ -273,7 +274,14 @@ class VectorIndex {
 
     seastar::future<std::optional<LocalCentroidSnapshot>>
     build_local_index(uint32_t centroid_group_count) {
+        constexpr std::size_t kYieldEvery = 32;
         absl::flat_hash_map<centroid_id, CentroidBucket> centroid_bucket;
+        std::vector<std::pair<key_t, const VectorEntry *>> entries;
+        entries.reserve(_entries.size());
+
+        for (const auto &[key, entry] : _entries) {
+            entries.emplace_back(key, &entry);
+        }
 
         std::vector<std::vector<float>> inter_centroids =
             sample_random_vectors(centroid_group_count);
@@ -295,19 +303,23 @@ class VectorIndex {
 
         // Hardcoded 10 iterations of centroid rebuilding for now
         for (uint32_t i = 0; i < 10; i++) {
+            std::vector<centroid_id> centroid_ids;
+            centroid_ids.reserve(centroid_bucket.size());
             for (auto &[id, bucket] : centroid_bucket) {
                 bucket.member_keys.clear();
+                centroid_ids.push_back(id);
             }
 
             // Assign vectors to their nearest centroids
-            for (const auto &[key, entry] : _entries) {
+            std::size_t assigned_vectors = 0;
+            for (const auto &[key, entry] : entries) {
                 float max_score = -1.0f;
                 uint32_t max_score_index = 0;
 
                 for (uint32_t centroid_id = 0;
                      centroid_id < inter_centroids.size(); centroid_id++) {
                     const float score = ::vdb::find_cosine_similarity(
-                        entry.embedding, inter_centroids[centroid_id]);
+                        entry->embedding, inter_centroids[centroid_id]);
 
                     if (score > max_score) {
                         max_score_index = centroid_id;
@@ -316,11 +328,19 @@ class VectorIndex {
                 }
 
                 centroid_bucket[max_score_index].member_keys.insert(key);
+                if (++assigned_vectors % kYieldEvery == 0) {
+                    co_await seastar::coroutine::maybe_yield();
+                }
             }
 
             // Recompute centroids
-            for (uint32_t centroid_id = 0; centroid_id < centroid_group_count;
-                 centroid_id++) {
+            std::size_t centroid_index = 0;
+            for (const auto centroid_id : centroid_ids) {
+                if (centroid_index % kYieldEvery == 0) {
+                    co_await seastar::coroutine::maybe_yield();
+                }
+                ++centroid_index;
+
                 auto it = centroid_bucket.find(centroid_id);
                 if (it == centroid_bucket.end()) {
                     continue;
@@ -364,7 +384,25 @@ class VectorIndex {
          * Delete a key
          * In case of update if the entry changes the centroid
          **/
-        for (const auto &[centroid_id, bucket] : _centroid_buckets) {
+        std::vector<centroid_id> centroid_ids;
+        centroid_ids.reserve(_centroid_buckets.size());
+        for (const auto &[centroid_id, _] : _centroid_buckets) {
+            centroid_ids.push_back(centroid_id);
+        }
+
+        std::size_t centroid_index = 0;
+        for (const auto centroid_id : centroid_ids) {
+            if (centroid_index % kYieldEvery == 0) {
+                co_await seastar::coroutine::maybe_yield();
+            }
+            ++centroid_index;
+
+            auto bucket_it = _centroid_buckets.find(centroid_id);
+            if (bucket_it == _centroid_buckets.end()) {
+                continue;
+            }
+
+            const auto &bucket = bucket_it->second;
             for (const auto &key : bucket.member_keys) {
                 auto entry_it = _entries.find(key);
                 if (entry_it == _entries.end()) {

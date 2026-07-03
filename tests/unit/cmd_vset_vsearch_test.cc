@@ -1,8 +1,12 @@
+#include "cmd_info.hh"
 #include "cmd_vsearch.hh"
 #include "cmd_vset.hh"
 #include "router.hh"
 #include <cmath>
+#include <cstdio>
+#include <random>
 #include <seastar/core/sleep.hh>
+#include <seastar/core/smp.hh>
 #include <seastar/testing/test_case.hh>
 #include <seastar/util/memory-data-sink.hh>
 
@@ -80,10 +84,169 @@ std::vector<TestDocument> documents = {
         .value =
             "Exception-safe code preserves object consistency and releases "
             "acquired resources when an operation fails.",
-    // Also highly similar to the database query.
+        // Also highly similar to the database query.
         .embedding = "[0.98, 0.02, 0.00, 0.00]",
     },
 };
+
+std::vector<TestDocument> generate_mock_documents(std::size_t n) {
+    std::vector<TestDocument> generated;
+    generated.reserve(n);
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+    for (size_t i = 0; i < n; ++i) {
+        char embedding[64];
+        std::snprintf(embedding, sizeof(embedding), "[%.2f, %.2f, %.2f, %.2f]",
+                      dist(rng), dist(rng), dist(rng), dist(rng));
+
+        generated.push_back(TestDocument{
+            .index = "mock_index",
+            .key = "key_" + std::to_string(i),
+            .value = "value_" + std::to_string(i),
+            .embedding = embedding,
+        });
+    }
+
+    return generated;
+}
+
+SEASTAR_TEST_CASE(VECTOR_VSEARCH_TEST_SYNTAX) {
+    /**
+     * VSET <INDEX> <EMBEDDING>
+     */
+    co_return;
+}
+
+SEASTAR_TEST_CASE(VECTOR_VSET_TEST_SYNTAX) {
+    /**
+     * VSET <KEY> <VALUE> <INDEX> <EMBEDDING>
+     */
+    co_return;
+}
+
+
+
+SEASTAR_TEST_CASE(VECTOR_TEST_INDEX_BUILD) {
+    const std::size_t document_count = 5000 * seastar::smp::count;
+    std::vector<TestDocument> test_docs = generate_mock_documents(document_count);
+    std::vector<TestDocument> query_docs(test_docs.begin(),
+                                         test_docs.begin() + 10);
+    unsigned shard = 0;
+    for (const auto &doc : test_docs) {
+        const auto reply = co_await smp::submit_to(
+            shard,
+            [key = seastar::sstring(doc.key),
+             value = seastar::sstring(doc.value),
+             index = seastar::sstring(doc.index),
+             embedding = seastar::sstring(doc.embedding)]() mutable
+            -> seastar::future<seastar::sstring> {
+                auto out = make_out();
+                const resp::ArgvView cmd{
+                    "vset", key, value, index, embedding,
+                };
+                co_await handle_vset(cmd, out.out, local_service());
+                co_await out.out.close();
+                co_return bufs_to_sstring(out.bufs);
+            });
+
+        BOOST_REQUIRE_EQUAL(reply, "+OK\r\n");
+        shard = (shard + 1) % seastar::smp::count;
+    }
+
+    auto out = make_out();
+
+    const resp::ArgvView cmd{"info", "json"};
+
+    bool all_shards_indexed = false;
+    for (int attempt = 0; attempt < 600; ++attempt) {
+        all_shards_indexed = true;
+        for (unsigned sid = 0; sid < seastar::smp::count; ++sid) {
+            const bool shard_index_enabled =
+                co_await seastar::smp::submit_to(sid, [] {
+                    return local_service()
+                        .snapshot_vector_store_info()
+                        .index_enabled;
+                });
+            if (!shard_index_enabled) {
+                all_shards_indexed = false;
+                break;
+            }
+        }
+
+        if (all_shards_indexed) {
+            break;
+        }
+        co_await seastar::sleep(std::chrono::milliseconds(50));
+    }
+
+    BOOST_REQUIRE(all_shards_indexed);
+
+    co_await handle_info(cmd, out.out, local_service());
+    co_await out.out.close();
+
+    const auto reply = bufs_to_sstring(out.bufs);
+    BOOST_REQUIRE_NE(reply.find("\"vector_index_enabled\":true"),
+                     seastar::sstring::npos);
+
+    // Testcase for searching the queries
+    for (const auto &query : query_docs) {
+        auto out = make_out();
+
+        const resp::ArgvView cmd{"vsearch", query.index, query.embedding};
+
+        co_await handle_vsearch(cmd, out.out, local_service());
+        co_await out.out.close();
+
+        const auto reply = bufs_to_sstring(out.bufs);
+        auto pos = reply.find("\r\n");
+        BOOST_REQUIRE_NE(pos, seastar::sstring::npos);
+
+        pos = reply.find("\r\n", pos + 2);
+        BOOST_REQUIRE_NE(pos, seastar::sstring::npos);
+
+        const auto key_len_start = pos + 2;
+        BOOST_REQUIRE(key_len_start < reply.size());
+        BOOST_REQUIRE_EQUAL(reply[key_len_start], '$');
+
+        const auto key_len_end = reply.find("\r\n", key_len_start + 1);
+        BOOST_REQUIRE_NE(key_len_end, seastar::sstring::npos);
+
+        const auto key_len = std::stoul(std::string(
+            reply.substr(key_len_start + 1, key_len_end - key_len_start - 1)));
+        pos = key_len_end + 2 + key_len + 2;
+        BOOST_REQUIRE(pos < reply.size());
+
+        BOOST_REQUIRE_EQUAL(reply[pos], '$');
+        const auto value_len_end = reply.find("\r\n", pos + 1);
+        BOOST_REQUIRE_NE(value_len_end, seastar::sstring::npos);
+
+        const auto value_len = std::stoul(
+            std::string(reply.substr(pos + 1, value_len_end - pos - 1)));
+        const auto value_start = value_len_end + 2;
+        BOOST_REQUIRE(reply.size() >= value_start + value_len + 2);
+        const auto matched_value = reply.substr(value_start, value_len);
+        BOOST_REQUIRE(matched_value.starts_with("value_"));
+
+        const auto score_len_start = value_start + value_len + 2;
+        BOOST_REQUIRE(score_len_start < reply.size());
+        BOOST_REQUIRE_EQUAL(reply[score_len_start], '$');
+
+        const auto score_len_end = reply.find("\r\n", score_len_start + 1);
+        BOOST_REQUIRE_NE(score_len_end, seastar::sstring::npos);
+
+        const auto score_len = std::stoul(std::string(reply.substr(
+            score_len_start + 1, score_len_end - score_len_start - 1)));
+        const auto score_start = score_len_end + 2;
+        BOOST_REQUIRE(reply.size() >= score_start + score_len);
+
+        const auto score =
+            std::stof(std::string(reply.substr(score_start, score_len)));
+        BOOST_REQUIRE_GE(score, 0.6f);
+        BOOST_REQUIRE_LE(score, 1.0f);
+    }
+}
 
 SEASTAR_TEST_CASE(VECTOR_TEST_NO_INDEX_EXACT_MATCH) {
     for (const auto &document : documents) {
@@ -127,12 +290,13 @@ SEASTAR_TEST_CASE(VECTOR_TEST_NO_INDEX_EXACT_MATCH) {
     const auto len_end = reply.find("\r\n", len_start + 3);
     BOOST_REQUIRE_NE(len_end, seastar::sstring::npos);
 
-    const auto score_len =
-        std::stoul(std::string(reply.substr(len_start + 3, len_end - len_start - 3)));
+    const auto score_len = std::stoul(
+        std::string(reply.substr(len_start + 3, len_end - len_start - 3)));
     const auto score_start = len_end + 2;
     BOOST_REQUIRE(reply.size() >= score_start + score_len);
 
-    const auto score = std::stof(std::string(reply.substr(score_start, score_len)));
+    const auto score =
+        std::stof(std::string(reply.substr(score_start, score_len)));
     BOOST_CHECK_CLOSE(score, 1.0f, 0.0001f);
     co_return;
 }

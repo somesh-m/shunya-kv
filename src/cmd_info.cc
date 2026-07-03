@@ -9,6 +9,7 @@
 #include <hash.hh>
 #include <optional>
 #include <proto_helpers.hh>
+#include <unordered_set>
 #include <seastar/core/future.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/memory.hh>
@@ -31,6 +32,7 @@ struct STATS {
     size_t total_mem;
     uint64_t failed_alloc;
     shard_stats_snapshot shard_stats;
+    VectorStoreInfoSnapshot vector_info;
 };
 
 namespace {
@@ -44,6 +46,7 @@ STATS collect_statistics() {
     stats.total_mem = mem_stats.total_memory();
     stats.failed_alloc = mem_stats.failed_allocations();
     stats.shard_stats = shunyakv::local_service().snapshot_shard_stats();
+    stats.vector_info = shunyakv::local_service().snapshot_vector_store_info();
     return stats;
 }
 
@@ -111,6 +114,8 @@ seastar::future<std::string> fetchJsonInfo() {
     uint64_t total_probationary_pool_total_slots = 0;
     uint64_t total_probationary_pool_used_slots = 0;
     uint64_t total_probationary_eviction_count = 0;
+    std::size_t total_vector_entries = 0;
+    std::unordered_set<std::string> unique_indexes;
 
     std::string json;
     json.reserve(512 + per_shard.size() * 256);
@@ -139,6 +144,11 @@ seastar::future<std::string> fetchJsonInfo() {
             stats.shard_stats.probationary_pool_used_slots;
         total_probationary_eviction_count +=
             stats.shard_stats.probationary_eviction_count;
+        total_vector_entries += stats.vector_info.local_entry_count;
+
+        for (const auto &index : stats.vector_info.local_indexes) {
+            unique_indexes.emplace(index.c_str(), index.size());
+        }
 
         if (shard > 0) {
             json += ",";
@@ -160,7 +170,11 @@ seastar::future<std::string> fetchJsonInfo() {
             "\"eviction_count\":{},"
             "\"prob_pool_total_slots\":{},"
             "\"prob_pool_used_slots\":{},"
-            "\"prob_pool_eviction_count\":{}"
+            "\"prob_pool_eviction_count\":{},"
+            "\"vector_unique_indexes\":{},"
+            "\"vector_entries\":{},"
+            "\"vector_index_enabled\":{},"
+            "\"vector_index_building\":{}"
             "}}",
             shard, format_bytes(stats.allocated_mem),
             format_bytes(stats.free_mem), format_bytes(stats.total_mem),
@@ -171,10 +185,21 @@ seastar::future<std::string> fetchJsonInfo() {
             stats.shard_stats.cache_miss, stats.shard_stats.eviction_count,
             stats.shard_stats.probationary_pool_total_slots,
             stats.shard_stats.probationary_pool_used_slots,
-            stats.shard_stats.probationary_eviction_count);
+            stats.shard_stats.probationary_eviction_count,
+            stats.vector_info.local_indexes.size(),
+            stats.vector_info.local_entry_count,
+            stats.vector_info.index_enabled ? "true" : "false",
+            stats.vector_info.index_building ? "true" : "false");
     }
 
     json += "],";
+
+    json += seastar::format(
+        "\"vector_db_info\":{{"
+        "\"unique_indexes\":{},"
+        "\"total_vector_entries\":{}"
+        "}},",
+        unique_indexes.size(), total_vector_entries);
 
     json += seastar::format(
         "\"shard_cumulative_info\":{{"
@@ -217,6 +242,8 @@ seastar::future<std::string> fetchInfo() {
         co_await seastar::when_all_succeed(futures.begin(), futures.end());
 
     STATS total{};
+    std::size_t total_vector_entries = 0;
+    std::unordered_set<std::string> unique_indexes;
     std::string payload;
     payload.reserve(256 + per_shard.size() * 128);
     payload += "desc: shard_info\n";
@@ -228,6 +255,10 @@ seastar::future<std::string> fetchInfo() {
         total.allocated_mem += stats.allocated_mem;
         total.total_mem += stats.total_mem;
         total.failed_alloc += stats.failed_alloc;
+        total_vector_entries += stats.vector_info.local_entry_count;
+        for (const auto &index : stats.vector_info.local_indexes) {
+            unique_indexes.emplace(index.c_str(), index.size());
+        }
         // total.cache_miss += stats.cache_miss;
         // total.eviction_count += stats.eviction_count;
 
@@ -236,15 +267,25 @@ seastar::future<std::string> fetchInfo() {
             "{}\ntotal_memory: "
             "{}\ntotal_allocs: {}\nfailed_allocs: {}\npool_total_slots: "
             "{}\npool_available_slots: {}\npool_fallback_allocs: "
-            "{}\nkey_count: {}\ncache_miss: {}\neviction_count: {}\n\n",
+            "{}\nkey_count: {}\ncache_miss: {}\neviction_count: "
+            "{}\nvector_unique_indexes: {}\nvector_entries: "
+            "{}\nvector_index_enabled: {}\nvector_index_building: {}\n\n",
             shard, format_bytes(stats.allocated_mem),
             format_bytes(stats.free_mem), format_bytes(stats.total_mem),
             stats.total_allocs, stats.failed_alloc,
             stats.shard_stats.pool_total_slots,
             stats.shard_stats.pool_available_slots,
             stats.shard_stats.pool_fallback_allocs, stats.shard_stats.key_count,
-            stats.shard_stats.cache_miss, stats.shard_stats.eviction_count);
+            stats.shard_stats.cache_miss, stats.shard_stats.eviction_count,
+            stats.vector_info.local_indexes.size(),
+            stats.vector_info.local_entry_count,
+            stats.vector_info.index_enabled ? "true" : "false",
+            stats.vector_info.index_building ? "true" : "false");
     }
+
+    payload += "desc: vector_db_info\n";
+    payload += seastar::format("unique_indexes: {}\ntotal_vector_entries: {}\n",
+                               unique_indexes.size(), total_vector_entries);
 
     payload += "desc: total_info\n";
     payload += seastar::format(

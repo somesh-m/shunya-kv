@@ -1,6 +1,7 @@
 #include "vector/vector_store.hh"
 
 #include <utility>
+#include <seastar/coroutine/maybe_yield.hh>
 
 namespace shunyakv {
 
@@ -17,6 +18,7 @@ seastar::future<bool> VectorStore::vset(std::string_view index,
 
     it->second->upsert(seastar::sstring(key), std::move(embedding),
                        std::move(value), centroid);
+    ++write_generation_;
 
     co_return true;
 }
@@ -33,6 +35,7 @@ seastar::future<bool> VectorStore::vset_brute(std::string_view index,
 
     it->second->upsert_brute(seastar::sstring(key), std::move(embedding),
                              std::move(value));
+    ++write_generation_;
 
     co_return true;
 }
@@ -94,6 +97,7 @@ seastar::future<std::vector<LocalCentroidSnapshot>>
 VectorStore::build_local_index() {
     // This needs to be done per index
     index_building_ = true;
+    co_await seastar::coroutine::maybe_yield();
     std::vector<LocalCentroidSnapshot> snapshots;
     snapshots.reserve(vector_index_map_.size());
     for (const auto &[key, entry] : vector_index_map_) {
@@ -120,6 +124,21 @@ std::size_t VectorStore::local_entry_count() const {
         local_count += entry->total_entry_count();
     }
     return local_count;
+}
+
+VectorStoreInfoSnapshot VectorStore::snapshot_info() const {
+    VectorStoreInfoSnapshot snapshot;
+    snapshot.local_entry_count = local_entry_count();
+    snapshot.write_generation = write_generation_;
+    snapshot.index_enabled = index_enabled_;
+    snapshot.index_building = index_building_;
+    snapshot.local_indexes.reserve(vector_index_map_.size());
+
+    for (const auto &[index, _] : vector_index_map_) {
+        snapshot.local_indexes.push_back(index);
+    }
+
+    return snapshot;
 }
 
 } // namespace shunyakv

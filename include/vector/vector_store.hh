@@ -21,6 +21,14 @@
 
 using namespace seastar;
 namespace shunyakv {
+struct VectorStoreInfoSnapshot {
+    std::vector<seastar::sstring> local_indexes;
+    std::size_t local_entry_count = 0;
+    uint64_t write_generation = 0;
+    bool index_enabled = false;
+    bool index_building = false;
+};
+
 class VectorStore {
 
   public:
@@ -51,15 +59,18 @@ class VectorStore {
                   uint32_t top_k);
 
     bool is_index_enabled() const { return index_enabled_; }
+    bool is_index_building() const { return index_building_; }
 
     future<std::vector<LocalCentroidSnapshot>> build_local_index();
     std::size_t local_entry_count() const;
+    VectorStoreInfoSnapshot snapshot_info() const;
 
   private:
     absl::flat_hash_map<vector_index_t, std::unique_ptr<VectorIndex>>
         vector_index_map_;
     bool index_enabled_ = false; // Replicated variable
     bool index_building_ = false;
+    uint64_t write_generation_ = 0;
     uint64_t index_version_ = 0;
     uint32_t centroid_group_count_ = 5;
 };

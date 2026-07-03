@@ -8,6 +8,7 @@
 
 #include <seastar/core/future-util.hh>
 #include <seastar/core/sleep.hh>
+#include <seastar/util/log.hh>
 
 using namespace seastar;
 namespace shunyakv {
@@ -15,6 +16,7 @@ namespace shunyakv {
 namespace {
 
 constexpr uint32_t kDefaultVsearchTopK = 5;
+static seastar::logger router_logger{"router"};
 
 future<std::vector<VectorSearchResult>>
 fanout_search(service &coordinator, std::string_view index,
@@ -101,6 +103,26 @@ future<std::size_t> service::fetch_vector_entry_count() {
     co_return global_total;
 }
 
+namespace {
+
+future<std::vector<uint64_t>> fetch_vector_write_generations() {
+    std::vector<future<uint64_t>> pending;
+    pending.reserve(seastar::smp::count);
+
+    for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
+        pending.push_back(seastar::smp::submit_to(shard, [] {
+            return shunyakv::local_service()
+                .snapshot_vector_store_info()
+                .write_generation;
+        }));
+    }
+
+    co_return co_await seastar::when_all_succeed(pending.begin(),
+                                                 pending.end());
+}
+
+} // namespace
+
 future<> service::publish_routing_snapshots(
     std::vector<LocalCentroidSnapshot> snapshots) {
     if (snapshots.empty()) {
@@ -111,8 +133,8 @@ future<> service::publish_routing_snapshots(
     pending.reserve(seastar::smp::count);
 
     for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
-        pending.push_back(seastar::smp::submit_to(
-            shard, [snapshots = snapshots]() mutable {
+        pending.push_back(
+            seastar::smp::submit_to(shard, [snapshots = snapshots]() mutable {
                 auto &local_service = shunyakv::local_service();
 
                 for (const auto &snapshot : snapshots) {
@@ -127,13 +149,23 @@ future<> service::publish_routing_snapshots(
 }
 
 future<> service::bg_count_checker() {
+    router_logger.info("bg checker has started");
+    std::optional<std::vector<uint64_t>> previous_write_generations;
     try {
         while (true) {
-            co_await seastar::sleep_abortable(std::chrono::seconds(30),
+            co_await seastar::sleep_abortable(std::chrono::seconds(10),
                                               _index_build_as);
 
             const auto count = co_await fetch_vector_entry_count();
-            if (count < 10 * seastar::smp::count) {
+            if (count < 4000 * seastar::smp::count) {
+                previous_write_generations.reset();
+                continue;
+            }
+
+            auto write_generations = co_await fetch_vector_write_generations();
+            if (!previous_write_generations ||
+                *previous_write_generations != write_generations) {
+                previous_write_generations = std::move(write_generations);
                 continue;
             }
 
@@ -142,14 +174,13 @@ future<> service::bg_count_checker() {
 
             for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
                 pending.push_back(seastar::smp::submit_to(shard, [] {
-                    return shunyakv::local_service().vector_store_
-                        .build_local_index();
+                    return shunyakv::local_service()
+                        .vector_store_.build_local_index();
                 }));
             }
 
-            auto local_snapshots =
-                co_await seastar::when_all_succeed(pending.begin(),
-                                                   pending.end());
+            auto local_snapshots = co_await seastar::when_all_succeed(
+                pending.begin(), pending.end());
 
             std::vector<LocalCentroidSnapshot> snapshots_to_publish;
             for (auto &snapshot_group : local_snapshots) {
@@ -217,8 +248,7 @@ future<std::optional<sstring>> service::vget(std::string_view key,
 
     for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
         pending.push_back(seastar::smp::submit_to(
-            shard,
-            [index_copy = owned_index, key_copy = owned_key]() mutable {
+            shard, [index_copy = owned_index, key_copy = owned_key]() mutable {
                 return shunyakv::local_service().local_vget(key_copy,
                                                             index_copy);
             }));
@@ -373,6 +403,10 @@ service::snapshot_request_latency_counters() const noexcept {
 
 shard_stats_snapshot service::snapshot_shard_stats() const noexcept {
     return _store.snapshot_stats();
+}
+
+VectorStoreInfoSnapshot service::snapshot_vector_store_info() const {
+    return vector_store_.snapshot_info();
 }
 
 future<VectorPoint>
