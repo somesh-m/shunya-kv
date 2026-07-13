@@ -65,7 +65,7 @@ class service : public seastar::peering_sharded_service<service> {
         std::span<const float> query_embedding, std::string_view index,
         std::optional<uint32_t> result_count = std::nullopt);
 
-    future<VectorPoint>
+    future<std::optional<VectorPoint>>
     find_vector_owner_shard(std::span<const float> embedding,
                             std::string_view index);
 

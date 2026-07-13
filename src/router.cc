@@ -269,8 +269,12 @@ future<bool> service::vset(std::string_view index, std::string_view key,
         co_return co_await vector_store_.vset_brute(
             index, key, std::move(embedding), std::move(value));
     }
-    const VectorPoint owner_point =
+    const std::optional<VectorPoint> owner_point =
         co_await find_vector_owner_shard(embedding, index);
+    if (!owner_point || owner_point->target_shard_id >= seastar::smp::count) {
+        co_return false;
+    }
+
     // Check if the (key, index) already exists
     const std::optional<shard_id> existing_shard =
         co_await check_if_key_exists(key, index);
@@ -287,17 +291,17 @@ future<bool> service::vset(std::string_view index, std::string_view key,
                 });
         }
     }
-    if (owner_point.target_shard_id == seastar::this_shard_id()) {
+    if (owner_point->target_shard_id == seastar::this_shard_id()) {
         co_return co_await local_vset(index, key, std::move(embedding),
-                                      std::move(value), owner_point.id);
+                                      std::move(value), owner_point->id);
     }
 
     std::string owned_index{index};
     std::string owned_key{key};
-    const centroid_id owner_centroid = owner_point.id;
+    const centroid_id owner_centroid = owner_point->id;
 
     co_return co_await seastar::smp::submit_to(
-        owner_point.target_shard_id,
+        owner_point->target_shard_id,
         [index = std::move(owned_index), key = std::move(owned_key),
          embedding = std::move(embedding), value = std::move(value),
          owner_centroid]() mutable {
@@ -453,7 +457,7 @@ service::check_if_key_exists(std::string_view key, std::string_view index) {
     co_return std::nullopt;
 }
 
-future<VectorPoint>
+future<std::optional<VectorPoint>>
 service::find_vector_owner_shard(std::span<const float> embedding,
                                  std::string_view index) {
     /**
@@ -469,19 +473,17 @@ service::find_vector_owner_shard(std::span<const float> embedding,
      * Send the write request to nearest_centroid->first shard and
      * nearest_centroid->second centroid
      */
-    VectorPoint result;
     for (const auto &[target_shard, centroid_ids] : nearest_centroid) {
         if (centroid_ids.empty()) {
             continue;
         }
-        result = VectorPoint{
+        co_return VectorPoint{
             .id = *centroid_ids.begin(),
             .target_shard_id = target_shard,
         };
-        break;
     }
 
-    co_return result;
+    co_return std::nullopt;
 }
 
 future<scatter_result>
