@@ -34,9 +34,11 @@ class service : public seastar::peering_sharded_service<service> {
     future<std::optional<sstring>> local_vget(std::string_view,
                                               std::string_view);
     future<std::optional<sstring>> vget(std::string_view, std::string_view);
+    future<bool> vdelete(std::string_view index, std::string_view key);
     future<bool> local_vset(std::string_view index, std::string_view key,
                             std::vector<float> embedding, std::string value,
                             centroid_id centroid);
+    future<bool> local_vdelete(std::string_view index, std::string_view key);
     future<std::vector<VectorSearchResult>>
     local_vsearch(std::string_view index, std::vector<float> query_embedding,
                   uint32_t top_k, centroid_id centroid);
@@ -73,6 +75,9 @@ class service : public seastar::peering_sharded_service<service> {
     seastar::future<> bg_count_checker();
     future<>
     publish_routing_snapshots(std::vector<LocalCentroidSnapshot> snapshots);
+
+    future<std::optional<shard_id>>
+    check_if_key_exists(std::string_view key, std::string_view index);
 
   private:
     future<> ensure_started();

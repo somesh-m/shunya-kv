@@ -24,7 +24,6 @@ namespace shunyakv {
 struct VectorStoreInfoSnapshot {
     std::vector<seastar::sstring> local_indexes;
     std::size_t local_entry_count = 0;
-    uint64_t write_generation = 0;
     bool index_enabled = false;
     bool index_building = false;
 };
@@ -45,6 +44,7 @@ class VectorStore {
                       centroid_id centroid);
     future<bool> vset_brute(std::string_view index, std::string_view key,
                             std::vector<float> embedding, std::string value);
+    future<bool> vdelete(std::string_view index, std::string_view key);
     future<std::optional<sstring>> vget(std::string_view index,
                                         std::string_view key);
 
@@ -58,6 +58,8 @@ class VectorStore {
     vsearch_brute(std::string_view index, std::vector<float> query_embedding,
                   uint32_t top_k);
 
+    bool check_if_key_exists(std::string_view key, std::string_view index);
+
     bool is_index_enabled() const { return index_enabled_; }
     bool is_index_building() const { return index_building_; }
 
@@ -70,7 +72,6 @@ class VectorStore {
         vector_index_map_;
     bool index_enabled_ = false; // Replicated variable
     bool index_building_ = false;
-    uint64_t write_generation_ = 0;
     uint64_t index_version_ = 0;
     uint32_t centroid_group_count_ = 5;
 };

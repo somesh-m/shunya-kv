@@ -1,6 +1,8 @@
 #pragma once
 
+#include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
+#include <optional>
 #include <queue>
 #include <seastar/core/shard_id.hh>
 #include <seastar/core/sstring.hh>
@@ -47,10 +49,27 @@ struct VectorSearchResult {
 using VectorResultQueue =
     std::priority_queue<VectorSearchResult, std::vector<VectorSearchResult>,
                         std::greater<VectorSearchResult>>;
+
+struct HnswIndex {
+    // node_id -> level -> neighbour node_ids
+    std::vector<std::vector<std::vector<std::size_t>>> neighbours;
+    // node_id -> real key
+    std::vector<key_t> member_keys;
+    std::optional<std::size_t> entry_point;
+    std::size_t m = 8;
+    std::size_t ef_construction = 64;
+    std::size_t max_level = 0;
+    std::vector<bool> deleted;
+    absl::flat_hash_map<key_t, std::size_t> key_to_node;
+    std::size_t tombstone_count = 0;
+};
+
 struct CentroidBucket {
     centroid_id id = 0;
     std::vector<float> centroid_vector;
     absl::flat_hash_set<key_t> member_keys;
+
+    HnswIndex hnsw_index;
 };
 
 enum class distance_metric { cosine, dot_product, l2 };

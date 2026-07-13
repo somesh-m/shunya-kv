@@ -297,6 +297,7 @@ add_executable(orchestrator_unit_test
   ${SHUNYA_SRC_DIR}/resp/resp_stream_processor.cc
   ${SHUNYA_SRC_DIR}/commands.cc
   ${SHUNYA_SRC_DIR}/cmd_set.cc
+  ${SHUNYA_SRC_DIR}/cmd_vdelete.cc
   ${SHUNYA_SRC_DIR}/cmd_vget.cc
   ${SHUNYA_SRC_DIR}/cmd_vset.cc
   ${SHUNYA_SRC_DIR}/cmd_vsearch.cc
@@ -387,6 +388,7 @@ add_executable(resp_handler_unit_test
   ${SHUNYA_SRC_DIR}/resp/resp_stream_processor.cc
   ${SHUNYA_SRC_DIR}/commands.cc
   ${SHUNYA_SRC_DIR}/cmd_set.cc
+  ${SHUNYA_SRC_DIR}/cmd_vdelete.cc
   ${SHUNYA_SRC_DIR}/cmd_vget.cc
   ${SHUNYA_SRC_DIR}/cmd_vset.cc
   ${SHUNYA_SRC_DIR}/cmd_vsearch.cc

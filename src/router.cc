@@ -103,26 +103,6 @@ future<std::size_t> service::fetch_vector_entry_count() {
     co_return global_total;
 }
 
-namespace {
-
-future<std::vector<uint64_t>> fetch_vector_write_generations() {
-    std::vector<future<uint64_t>> pending;
-    pending.reserve(seastar::smp::count);
-
-    for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
-        pending.push_back(seastar::smp::submit_to(shard, [] {
-            return shunyakv::local_service()
-                .snapshot_vector_store_info()
-                .write_generation;
-        }));
-    }
-
-    co_return co_await seastar::when_all_succeed(pending.begin(),
-                                                 pending.end());
-}
-
-} // namespace
-
 future<> service::publish_routing_snapshots(
     std::vector<LocalCentroidSnapshot> snapshots) {
     if (snapshots.empty()) {
@@ -150,7 +130,6 @@ future<> service::publish_routing_snapshots(
 
 future<> service::bg_count_checker() {
     router_logger.info("bg checker has started");
-    std::optional<std::vector<uint64_t>> previous_write_generations;
     try {
         while (true) {
             co_await seastar::sleep_abortable(std::chrono::seconds(10),
@@ -158,14 +137,6 @@ future<> service::bg_count_checker() {
 
             const auto count = co_await fetch_vector_entry_count();
             if (count < 4000 * seastar::smp::count) {
-                previous_write_generations.reset();
-                continue;
-            }
-
-            auto write_generations = co_await fetch_vector_write_generations();
-            if (!previous_write_generations ||
-                *previous_write_generations != write_generations) {
-                previous_write_generations = std::move(write_generations);
                 continue;
             }
 
@@ -266,6 +237,28 @@ future<std::optional<sstring>> service::vget(std::string_view key,
     co_return std::nullopt;
 }
 
+future<bool> service::vdelete(std::string_view index, std::string_view key) {
+    co_await ensure_started();
+
+    const std::optional<shard_id> existing_shard =
+        co_await check_if_key_exists(key, index);
+    if (!existing_shard.has_value()) {
+        co_return false;
+    }
+
+    if (*existing_shard == seastar::this_shard_id()) {
+        co_return co_await local_vdelete(index, key);
+    }
+
+    std::string owned_index{index};
+    std::string owned_key{key};
+    co_return co_await seastar::smp::submit_to(
+        *existing_shard,
+        [index = std::move(owned_index), key = std::move(owned_key)]() mutable {
+            return shunyakv::local_service().local_vdelete(index, key);
+        });
+}
+
 future<bool> service::vset(std::string_view index, std::string_view key,
                            std::vector<float> embedding, std::string value) {
     co_await ensure_started();
@@ -276,7 +269,22 @@ future<bool> service::vset(std::string_view index, std::string_view key,
     }
     const VectorPoint owner_point =
         co_await find_vector_owner_shard(embedding, index);
-
+    // Check if the (key, index) already exists
+    const std::optional<shard_id> existing_shard =
+        co_await check_if_key_exists(key, index);
+    if (existing_shard.has_value()) {
+        if (*existing_shard == seastar::this_shard_id()) {
+            co_await local_vdelete(index, key);
+        } else {
+            std::string owned_index{index};
+            std::string owned_key{key};
+            co_await seastar::smp::submit_to(
+                *existing_shard,
+                [index = std::move(owned_index), key = std::move(owned_key)]() mutable {
+                    return shunyakv::local_service().local_vdelete(index, key);
+                });
+        }
+    }
     if (owner_point.target_shard_id == seastar::this_shard_id()) {
         co_return co_await local_vset(index, key, std::move(embedding),
                                       std::move(value), owner_point.id);
@@ -303,6 +311,12 @@ future<bool> service::local_vset(std::string_view index, std::string_view key,
     co_await ensure_started();
     co_return co_await vector_store_.vset(index, key, std::move(embedding),
                                           std::move(value), centroid);
+}
+
+future<bool> service::local_vdelete(std::string_view index,
+                                    std::string_view key) {
+    co_await ensure_started();
+    co_return co_await vector_store_.vdelete(index, key);
 }
 
 future<std::vector<VectorSearchResult>>
@@ -407,6 +421,34 @@ shard_stats_snapshot service::snapshot_shard_stats() const noexcept {
 
 VectorStoreInfoSnapshot service::snapshot_vector_store_info() const {
     return vector_store_.snapshot_info();
+}
+
+future<std::optional<shard_id>>
+service::check_if_key_exists(std::string_view key, std::string_view index) {
+    std::string owned_key{key};
+    std::string owned_index{index};
+
+    std::vector<future<bool>> pending;
+    pending.reserve(seastar::smp::count);
+
+    for (unsigned shard = 0; shard < seastar::smp::count; ++shard) {
+        pending.push_back(seastar::smp::submit_to(
+            shard, [key = owned_key, index = owned_index]() mutable {
+                return shunyakv::local_service().vector_store_.check_if_key_exists(
+                    key, index);
+            }));
+    }
+
+    auto shard_results =
+        co_await when_all_succeed(pending.begin(), pending.end());
+
+    for (unsigned shard = 0; shard < shard_results.size(); ++shard) {
+        if (shard_results[shard]) {
+            co_return shard_id{shard};
+        }
+    }
+
+    co_return std::nullopt;
 }
 
 future<VectorPoint>

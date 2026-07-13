@@ -1,9 +1,18 @@
 #include "vector/vector_store.hh"
 
-#include <utility>
 #include <seastar/coroutine/maybe_yield.hh>
+#include <utility>
 
 namespace shunyakv {
+
+bool VectorStore::check_if_key_exists(std::string_view key,
+                                      std::string_view index) {
+    auto it = vector_index_map_.find(seastar::sstring{index});
+    if (it == vector_index_map_.end()) {
+        return false;
+    }
+    return it->second->check_if_key_exists(key);
+}
 
 seastar::future<bool> VectorStore::vset(std::string_view index,
                                         std::string_view key,
@@ -18,7 +27,6 @@ seastar::future<bool> VectorStore::vset(std::string_view index,
 
     it->second->upsert(seastar::sstring(key), std::move(embedding),
                        std::move(value), centroid);
-    ++write_generation_;
 
     co_return true;
 }
@@ -35,9 +43,19 @@ seastar::future<bool> VectorStore::vset_brute(std::string_view index,
 
     it->second->upsert_brute(seastar::sstring(key), std::move(embedding),
                              std::move(value));
-    ++write_generation_;
 
     co_return true;
+}
+
+seastar::future<bool> VectorStore::vdelete(std::string_view index,
+                                           std::string_view key) {
+    const auto it = vector_index_map_.find(seastar::sstring(index));
+
+    if (it == vector_index_map_.end()) {
+        co_return false;
+    }
+
+    co_return it->second->erase(seastar::sstring(key));
 }
 
 seastar::future<std::optional<sstring>>
@@ -101,7 +119,8 @@ VectorStore::build_local_index() {
     std::vector<LocalCentroidSnapshot> snapshots;
     snapshots.reserve(vector_index_map_.size());
     for (const auto &[key, entry] : vector_index_map_) {
-        auto snapshot = co_await entry->build_local_index(centroid_group_count_);
+        auto snapshot =
+            co_await entry->build_local_index(centroid_group_count_);
         if (snapshot) {
             snapshots.push_back(std::move(*snapshot));
         }
@@ -129,7 +148,6 @@ std::size_t VectorStore::local_entry_count() const {
 VectorStoreInfoSnapshot VectorStore::snapshot_info() const {
     VectorStoreInfoSnapshot snapshot;
     snapshot.local_entry_count = local_entry_count();
-    snapshot.write_generation = write_generation_;
     snapshot.index_enabled = index_enabled_;
     snapshot.index_building = index_building_;
     snapshot.local_indexes.reserve(vector_index_map_.size());
