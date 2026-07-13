@@ -185,7 +185,9 @@ future<> service::start(const db_config &cfg) {
 
     co_await vector_store_.start(this_shard_id(), cfg, *memory_manager_);
     co_await _store.start(this_shard_id(), cfg, *memory_manager_);
-    _index_build_task.emplace(bg_count_checker());
+    if (this_shard_id() == 0) {
+        _index_build_task.emplace(bg_count_checker());
+    }
     _started = true;
     co_return;
 }
