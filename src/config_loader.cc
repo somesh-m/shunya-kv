@@ -142,6 +142,8 @@ void load_config_file(db_config &cfg, const char *path) {
             }
         } else if (key == "hash") {
             cfg.hash = seastar::sstring(value.data(), value.size());
+        } else if (key == "centroid_table_path") {
+            cfg.centroid_table_path.assign(value.data(), value.size());
         } else if (key == "policy") {
             eviction::EvictionPolicy parsed{};
             if (parse_policy(value, parsed)) {
@@ -215,7 +217,9 @@ void load_config_file(db_config &cfg, const char *path) {
     }
 
     std::cerr << "config state:" << " db_port=" << cfg.db_port
-              << " hash=" << cfg.hash << " send_shard_details_on_connect="
+              << " hash=" << cfg.hash
+              << " centroid_table_path=" << cfg.centroid_table_path
+              << " send_shard_details_on_connect="
               << (cfg.send_shard_details_on_connect ? "true" : "false")
               << " policy=" << policy_name(cfg.ev_config.policy)
               << " soft.trigger=" << cfg.ev_config.soft_.trigger

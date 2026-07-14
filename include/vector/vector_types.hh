@@ -18,6 +18,18 @@ namespace shunyakv {
 
 using vector_index_t = seastar::sstring;
 using centroid_id = uint32_t;
+
+struct GenerationId {
+    uint64_t index = 0;
+    uint64_t generation = 0;
+
+    bool operator==(const GenerationId &) const noexcept = default;
+
+    template <typename H> friend H AbslHashValue(H h, const GenerationId &id) {
+        return H::combine(std::move(h), id.index, id.generation);
+    }
+};
+
 using scatter_result =
     std::unordered_map<seastar::shard_id, std::unordered_set<centroid_id>>;
 struct GlobalCentroidId {
@@ -54,6 +66,21 @@ struct HnswIndex {
     // node_id -> level -> neighbour node_ids
     std::vector<std::vector<std::vector<std::size_t>>> neighbours;
     // node_id -> real key
+    std::vector<GenerationId> member_keys;
+    std::optional<std::size_t> entry_point;
+    std::size_t m = 16;
+    std::size_t ef_construction = 64;
+    std::size_t ef_search = 64;
+    std::size_t max_level = 0;
+    std::vector<bool> deleted;
+    absl::flat_hash_map<GenerationId, std::size_t> key_to_node;
+    std::size_t tombstone_count = 0;
+};
+
+// Compatibility representation for the original VectorIndex, which owns
+// entries by key instead of addressing them through VectorStorageManager.
+struct LegacyHnswIndex {
+    std::vector<std::vector<std::vector<std::size_t>>> neighbours;
     std::vector<key_t> member_keys;
     std::optional<std::size_t> entry_point;
     std::size_t m = 8;
@@ -69,10 +96,12 @@ struct CentroidBucket {
     std::vector<float> centroid_vector;
     absl::flat_hash_set<key_t> member_keys;
 
-    HnswIndex hnsw_index;
+    LegacyHnswIndex hnsw_index;
 };
 
 enum class distance_metric { cosine, dot_product, l2 };
+
+enum class State { ACCUMULATING, BUILDING_HNSW, HNSW_ACTIVE, HNSW_MERGING };
 
 struct VectorIndexConfig {
     uint32_t dim = 0;

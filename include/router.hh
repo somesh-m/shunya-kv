@@ -2,7 +2,8 @@
 #include "dbconfig.hh"
 #include "kv_store.hh"
 #include "router_metrics.hh"
-#include "vector/vector_store.hh"
+#include "vector/global_centroid_routing.hh"
+#include "vector/vector_index_manager.hh"
 
 #include "hotpath_metrics.hh"
 #include "pool/shard_memory_manager.hh"
@@ -23,6 +24,13 @@
 using namespace seastar;
 namespace shunyakv {
 
+struct VectorStoreInfoSnapshot {
+    std::vector<seastar::sstring> local_indexes;
+    std::size_t local_entry_count = 0;
+    bool index_enabled = false;
+    bool index_building = false;
+};
+
 class service : public seastar::peering_sharded_service<service> {
   public:
     future<> start(const db_config &cfg);
@@ -41,7 +49,7 @@ class service : public seastar::peering_sharded_service<service> {
     future<bool> local_vdelete(std::string_view index, std::string_view key);
     future<std::vector<VectorSearchResult>>
     local_vsearch(std::string_view index, std::vector<float> query_embedding,
-                  uint32_t top_k, centroid_id centroid);
+                  uint32_t top_k, std::vector<centroid_id> centroids);
     future<std::vector<VectorSearchResult>>
     local_vsearch_brute(std::string_view index,
                         std::vector<float> query_embedding, uint32_t top_k);
@@ -60,39 +68,21 @@ class service : public seastar::peering_sharded_service<service> {
     shard_stats_snapshot snapshot_shard_stats() const noexcept;
     VectorStoreInfoSnapshot snapshot_vector_store_info() const;
 
-    // Vector DB Related functions
-    future<scatter_result> find_global_top_centroids(
-        std::span<const float> query_embedding, std::string_view index,
-        std::optional<uint32_t> result_count = std::nullopt);
-
-    future<std::optional<VectorPoint>>
-    find_vector_owner_shard(std::span<const float> embedding,
-                            std::string_view index);
-
-    future<shard_id> find_storage_shard(std::span<const float>);
-
-    seastar::future<std::size_t> fetch_vector_entry_count();
-    seastar::future<> bg_count_checker();
-    future<>
-    publish_routing_snapshots(std::vector<LocalCentroidSnapshot> snapshots);
-
-    future<std::optional<shard_id>>
-    check_if_key_exists(std::string_view key, std::string_view index);
-
   private:
     future<> ensure_started();
+    future<> publish_vector_owner(key_t key,
+                                  std::optional<VectorPoint> owner);
     // Shard Memory manager is created per shard. It manages the memory usage at
     // each shard level
+    std::optional<db_config> config_;
     std::optional<pool::ShardMemoryManager> memory_manager_;
+    std::optional<EntryPool> vector_entry_pool_;
+    std::optional<VectorIndexManager> vector_index_manager_;
+    GlobalCentroidRouting global_centroid_routing_;
 
     // Instantiate any other store here in the future.
     store _store;
-    VectorStore vector_store_;
-    // Instantiate the vdb orchestrator as well here
-    ::vdb::VDBOrchestrator vdb_orch_;
     bool _started{false};
-    seastar::abort_source _index_build_as;
-    std::optional<future<>> _index_build_task;
     request_counters _req_counters;
     request_latency_counters _latency_counters;
 };

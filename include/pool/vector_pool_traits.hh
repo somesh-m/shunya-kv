@@ -21,13 +21,13 @@ template <> struct PoolTraits<shunyakv::vdb::Entry> {
 
     static void reset(shunyakv::vdb::Entry &entry,
                       const db_config &cfg) {
-        // KV-specific reset
-
         entry.in_use_ = false;
         entry.visited = false;
         entry.value.clear();
         entry.key = "";
+        entry.embedding.clear();
         entry.ver = 0;
+        entry.centroid = 0;
 
         const std::size_t offset = value_offset(cfg);
         if (entry.value.capacity() > offset * 2) {

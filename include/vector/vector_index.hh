@@ -484,7 +484,7 @@ class VectorIndex {
 
     uint32_t dim() const { return _config.dim; }
 
-    void insert_into_hnsw_index(const key_t &key, HnswIndex &index) {
+    void insert_into_hnsw_index(const key_t &key, LegacyHnswIndex &index) {
         auto entry_it = _entries.find(key);
         if (entry_it == _entries.end()) {
             return;
@@ -554,7 +554,7 @@ class VectorIndex {
     }
 
     void connect_bidirectional(std::size_t a, std::size_t b, std::size_t level,
-                               HnswIndex &index) {
+                               LegacyHnswIndex &index) {
         index.neighbours[a][level].push_back(b);
         index.neighbours[b][level].push_back(a);
 
@@ -569,24 +569,25 @@ class VectorIndex {
         return true;
     }
 
-    bool is_valid_hnsw_node(std::size_t node_id, const HnswIndex &index) const {
+    bool is_valid_hnsw_node(std::size_t node_id,
+                            const LegacyHnswIndex &index) const {
         return node_id < index.member_keys.size() &&
                node_id < index.neighbours.size();
     }
 
     bool is_deleted_hnsw_node(std::size_t node_id,
-                              const HnswIndex &index) const {
+                              const LegacyHnswIndex &index) const {
         return node_id < index.deleted.size() && index.deleted[node_id];
     }
 
     bool has_hnsw_level(std::size_t node_id, std::size_t level,
-                        const HnswIndex &index) const {
+                        const LegacyHnswIndex &index) const {
         return is_valid_hnsw_node(node_id, index) &&
                level < index.neighbours[node_id].size();
     }
 
     float score_hnsw_node(const std::vector<float> &query, std::size_t node_id,
-                          const HnswIndex &index) const {
+                          const LegacyHnswIndex &index) const {
         if (!is_valid_hnsw_node(node_id, index) ||
             is_deleted_hnsw_node(node_id, index)) {
             return -std::numeric_limits<float>::infinity();
@@ -606,7 +607,7 @@ class VectorIndex {
 
     std::size_t greedy_search_vector(const std::vector<float> &query,
                                      std::size_t entry_point, std::size_t level,
-                                     const HnswIndex &index) const {
+                                     const LegacyHnswIndex &index) const {
         if (!is_valid_hnsw_node(entry_point, index)) {
             return entry_point;
         }
@@ -670,7 +671,7 @@ class VectorIndex {
         return selected;
     }
 
-    bool delete_from_hnsw_index(const key_t &key, HnswIndex &index) {
+    bool delete_from_hnsw_index(const key_t &key, LegacyHnswIndex &index) {
         auto node_it = index.key_to_node.find(key);
 
         if (node_it == index.key_to_node.end()) {
@@ -785,7 +786,7 @@ class VectorIndex {
         }
     }
 
-    bool should_rebuild_hnsw_index(const HnswIndex &index) const {
+    bool should_rebuild_hnsw_index(const LegacyHnswIndex &index) const {
         const std::size_t total_nodes = index.member_keys.size();
 
         if (total_nodes == 0) {
@@ -806,7 +807,8 @@ class VectorIndex {
     std::vector<scored_node>
     search_layer_vector(const std::vector<float> &query,
                         std::size_t entry_point, std::size_t ef,
-                        std::size_t level, const HnswIndex &index) const {
+                        std::size_t level,
+                        const LegacyHnswIndex &index) const {
         std::vector<scored_node> result;
 
         if (ef == 0) {
@@ -943,7 +945,7 @@ class VectorIndex {
     }
 
     void prune_neighbours(std::size_t node_id, std::size_t level,
-                          HnswIndex &index) {
+                          LegacyHnswIndex &index) {
         if (node_id >= index.neighbours.size()) {
             return;
         }

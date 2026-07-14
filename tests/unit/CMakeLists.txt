@@ -5,6 +5,7 @@ add_executable(cmd_set_unit_test
   ${SHUNYA_SRC_DIR}/kv_store.cc
   ${SHUNYA_SRC_DIR}/vector/vector_store.cc
   ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
   ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
@@ -68,6 +69,7 @@ add_executable(cmd_get_unit_test
   ${SHUNYA_SRC_DIR}/kv_store.cc
   ${SHUNYA_SRC_DIR}/vector/vector_store.cc
   ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
   ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
@@ -127,6 +129,7 @@ add_executable(cmd_vset_vsearch_unit_test
   ${SHUNYA_SRC_DIR}/kv_store.cc
   ${SHUNYA_SRC_DIR}/vector/vector_store.cc
   ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
   ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
@@ -169,6 +172,7 @@ add_executable(cmd_node_info_unit_test
   ${SHUNYA_SRC_DIR}/kv_store.cc
   ${SHUNYA_SRC_DIR}/vector/vector_store.cc
   ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
   ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
@@ -310,6 +314,7 @@ add_executable(orchestrator_unit_test
   ${SHUNYA_SRC_DIR}/kv_store.cc
   ${SHUNYA_SRC_DIR}/vector/vector_store.cc
   ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
   ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
@@ -401,6 +406,7 @@ add_executable(resp_handler_unit_test
   ${SHUNYA_SRC_DIR}/kv_store.cc
   ${SHUNYA_SRC_DIR}/vector/vector_store.cc
   ${SHUNYA_SRC_DIR}/pool/object_pool.cc
+  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
   ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
   ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
