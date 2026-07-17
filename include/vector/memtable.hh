@@ -27,34 +27,32 @@ class Memtable {
   private:
     using scored_node = std::pair<std::size_t, float>;
 
-    static constexpr std::size_t threshold_ = 3000;
-    static constexpr std::size_t yield_every_ = 10;
+    static constexpr std::size_t threshold_ = 7000;
+    static constexpr std::size_t yield_every_ =
+        20; // Increased to protect tight CPU loops from scheduling overhead
     static constexpr std::size_t max_immutable_indexes_ = 5;
 
     VectorStorageManager &storage_;
     mutable seastar::semaphore operation_sem_{1};
     absl::flat_hash_set<GenerationId> entries_;
     std::deque<absl::flat_hash_set<GenerationId>> pending_compilation_queue_;
-    std::vector<std::unique_ptr<HnswIndex>> immutable_indexes_;
+    std::vector<std::shared_ptr<HnswIndex>> immutable_indexes_;
 
     seastar::future<> build_hnsw_index();
     seastar::future<> compact_hnsw_indexes();
     seastar::future<> rebuild_hnsw_index(HnswIndex &index);
-    seastar::future<> insert_into_hnsw_index(GenerationId id,
-                                             HnswIndex &index);
-    void connect_bidirectional(std::size_t a, std::size_t b,
-                               std::size_t level, HnswIndex &index);
+    seastar::future<> insert_into_hnsw_index(GenerationId id, HnswIndex &index);
+    void connect_bidirectional(std::size_t a, std::size_t b, std::size_t level,
+                               HnswIndex &index);
     void prune_neighbours(std::size_t node_id, std::size_t level,
                           HnswIndex &index);
 
-    bool is_valid_hnsw_node(std::size_t node_id,
-                            const HnswIndex &index) const;
+    bool is_valid_hnsw_node(std::size_t node_id, const HnswIndex &index) const;
     bool is_deleted_hnsw_node(std::size_t node_id,
                               const HnswIndex &index) const;
     bool has_hnsw_level(std::size_t node_id, std::size_t level,
                         const HnswIndex &index) const;
-    float score_hnsw_node(const std::vector<float> &query,
-                          std::size_t node_id,
+    float score_hnsw_node(const std::vector<float> &query, std::size_t node_id,
                           const HnswIndex &index) const;
     seastar::future<std::size_t>
     greedy_search_vector(const std::vector<float> &query,
@@ -86,7 +84,8 @@ class Memtable {
 };
 
 inline seastar::future<bool> Memtable::insert(GenerationId id) {
-    // auto operation_units = co_await seastar::get_units(operation_sem_, 1);
+
+    auto operation_units = co_await seastar::get_units(operation_sem_, 1);
     if (storage_.get(id) == nullptr) {
         co_return false;
     }
@@ -100,7 +99,13 @@ inline seastar::future<bool> Memtable::insert(GenerationId id) {
         pending_compilation_queue_.push_back(std::move(entries_));
         entries_.clear();
         entries_.reserve(threshold_);
-        co_await build_hnsw_index();
+        (void)build_hnsw_index().handle_exception([](std::exception_ptr ep) {
+            try {
+                std::rethrow_exception(ep);
+            } catch (const std::exception &e) {
+                std::cerr << "HNSW index build failed: " << e.what() << '\n';
+            }
+        });
     }
     co_return true;
 }
@@ -110,7 +115,7 @@ inline seastar::future<> Memtable::build_hnsw_index() {
         auto members = std::move(pending_compilation_queue_.front());
         pending_compilation_queue_.pop_front();
 
-        auto index = std::make_unique<HnswIndex>();
+        auto index = std::make_shared<HnswIndex>();
         index->neighbours.reserve(members.size());
         index->member_keys.reserve(members.size());
         index->key_to_node.reserve(members.size());
@@ -125,9 +130,9 @@ inline seastar::future<> Memtable::build_hnsw_index() {
         }
         if (!index->member_keys.empty()) {
             immutable_indexes_.push_back(std::move(index));
-            if (immutable_indexes_.size() > max_immutable_indexes_) {
-                co_await compact_hnsw_indexes();
-            }
+            // if (immutable_indexes_.size() > max_immutable_indexes_) {
+            //     co_await compact_hnsw_indexes();
+            // }
         }
     }
     co_return;
@@ -143,7 +148,7 @@ inline seastar::future<> Memtable::compact_hnsw_indexes() {
         live_count += index->member_keys.size() - index->tombstone_count;
     }
 
-    auto compacted = std::make_unique<HnswIndex>();
+    auto compacted = std::make_shared<HnswIndex>();
     const HnswIndex &config_source = *immutable_indexes_.front();
     compacted->m = config_source.m;
     compacted->ef_construction = config_source.ef_construction;
@@ -154,7 +159,8 @@ inline seastar::future<> Memtable::compact_hnsw_indexes() {
     compacted->deleted.reserve(live_count);
 
     std::size_t inserted_count = 0;
-    for (const auto &index : immutable_indexes_) {
+    const auto immutable_indexes_snapshot = immutable_indexes_;
+    for (const auto &index : immutable_indexes_snapshot) {
         for (std::size_t node_id = 0; node_id < index->member_keys.size();
              ++node_id) {
             if (is_deleted_hnsw_node(node_id, *index)) {
@@ -178,8 +184,8 @@ inline seastar::future<> Memtable::compact_hnsw_indexes() {
     co_return;
 }
 
-inline seastar::future<>
-Memtable::insert_into_hnsw_index(GenerationId id, HnswIndex &index) {
+inline seastar::future<> Memtable::insert_into_hnsw_index(GenerationId id,
+                                                          HnswIndex &index) {
     const VectorEntry *entry = storage_.get(id);
     if (entry == nullptr || index.key_to_node.contains(id)) {
         co_return;
@@ -225,15 +231,14 @@ Memtable::insert_into_hnsw_index(GenerationId id, HnswIndex &index) {
     co_return;
 }
 
-inline bool Memtable::is_valid_hnsw_node(
-    std::size_t node_id, const HnswIndex &index) const {
+inline bool Memtable::is_valid_hnsw_node(std::size_t node_id,
+                                         const HnswIndex &index) const {
     return node_id < index.member_keys.size() &&
-           node_id < index.neighbours.size() &&
-           node_id < index.deleted.size();
+           node_id < index.neighbours.size() && node_id < index.deleted.size();
 }
 
-inline bool Memtable::is_deleted_hnsw_node(
-    std::size_t node_id, const HnswIndex &index) const {
+inline bool Memtable::is_deleted_hnsw_node(std::size_t node_id,
+                                           const HnswIndex &index) const {
     return node_id >= index.deleted.size() || index.deleted[node_id];
 }
 
@@ -258,9 +263,10 @@ inline float Memtable::score_hnsw_node(const std::vector<float> &query,
         ::vdb::find_cosine_similarity(query, entry->embedding));
 }
 
-inline seastar::future<std::size_t> Memtable::greedy_search_vector(
-    const std::vector<float> &query, std::size_t entry_point,
-    std::size_t level, const HnswIndex &index) const {
+inline seastar::future<std::size_t>
+Memtable::greedy_search_vector(const std::vector<float> &query,
+                               std::size_t entry_point, std::size_t level,
+                               const HnswIndex &index) const {
     if (!has_hnsw_level(entry_point, level, index)) {
         co_return entry_point;
     }
@@ -293,9 +299,9 @@ inline seastar::future<std::size_t> Memtable::greedy_search_vector(
 }
 
 inline seastar::future<std::vector<Memtable::scored_node>>
-Memtable::search_layer_vector(
-    const std::vector<float> &query, std::size_t entry_point, std::size_t ef,
-    std::size_t level, const HnswIndex &index) const {
+Memtable::search_layer_vector(const std::vector<float> &query,
+                              std::size_t entry_point, std::size_t ef,
+                              std::size_t level, const HnswIndex &index) const {
     if (ef == 0 || !has_hnsw_level(entry_point, level, index)) {
         co_return std::vector<scored_node>{};
     }
@@ -392,10 +398,10 @@ inline std::size_t Memtable::random_level(std::size_t m,
 }
 
 inline void Memtable::connect_bidirectional(std::size_t a, std::size_t b,
-                                             std::size_t level,
-                                             HnswIndex &index) {
-    if (!has_hnsw_level(a, level, index) ||
-        !has_hnsw_level(b, level, index) || a == b) {
+                                            std::size_t level,
+                                            HnswIndex &index) {
+    if (!has_hnsw_level(a, level, index) || !has_hnsw_level(b, level, index) ||
+        a == b) {
         return;
     }
     index.neighbours[a][level].push_back(b);
@@ -404,8 +410,7 @@ inline void Memtable::connect_bidirectional(std::size_t a, std::size_t b,
     prune_neighbours(b, level, index);
 }
 
-inline void Memtable::prune_neighbours(std::size_t node_id,
-                                       std::size_t level,
+inline void Memtable::prune_neighbours(std::size_t node_id, std::size_t level,
                                        HnswIndex &index) {
     if (!has_hnsw_level(node_id, level, index)) {
         return;
@@ -499,18 +504,18 @@ inline seastar::future<bool> Memtable::erase(GenerationId id) {
         if (it == index->key_to_node.end()) {
             continue;
         }
+        // Amortized O(1) delete: mark tombstones and rely on compaction for
+        // cleanup
         index->deleted[it->second] = true;
         index->key_to_node.erase(it);
         ++index->tombstone_count;
-        co_await rebuild_hnsw_index(*index);
         co_return true;
     }
     co_return false;
 }
 
 inline seastar::future<std::vector<VectorSearchResult>>
-Memtable::search(const std::vector<float> &embedding,
-                 std::size_t top_k) const {
+Memtable::search(const std::vector<float> &embedding, std::size_t top_k) const {
     auto operation_units = co_await seastar::get_units(operation_sem_, 1);
     if (top_k == 0) {
         co_return std::vector<VectorSearchResult>{};
@@ -536,6 +541,7 @@ Memtable::search(const std::vector<float> &embedding,
     };
 
     std::size_t scored_count = 0;
+    // This loop is to find the closest one in the working set
     for (const GenerationId id : entries_) {
         const VectorEntry *entry = storage_.get(id);
         if (entry != nullptr) {
@@ -547,7 +553,8 @@ Memtable::search(const std::vector<float> &embedding,
         }
     }
 
-    for (const auto &index : immutable_indexes_) {
+    const auto immutable_indexes_snapshot = immutable_indexes_;
+    for (const auto &index : immutable_indexes_snapshot) {
         if (!index->entry_point.has_value()) {
             continue;
         }
@@ -556,10 +563,13 @@ Memtable::search(const std::vector<float> &embedding,
             ep = co_await greedy_search_vector(embedding, ep, level, *index);
         }
         const std::size_t ef = std::max(top_k, index->ef_search);
-        const auto candidates = co_await search_layer_vector(
-            embedding, ep, ef, 0, *index);
+        const auto candidates =
+            co_await search_layer_vector(embedding, ep, ef, 0, *index);
         for (const auto &[node_id, score] : candidates) {
-            consider(index->member_keys[node_id], score);
+            // Filter out tombstones returned during traversal
+            if (!is_deleted_hnsw_node(node_id, *index)) {
+                consider(index->member_keys[node_id], score);
+            }
         }
     }
 
@@ -571,8 +581,7 @@ Memtable::search(const std::vector<float> &embedding,
         const VectorEntry *entry = storage_.get(winner.id);
         if (entry != nullptr) {
             results.push_back(VectorSearchResult{
-                winner.score,
-                std::string(entry->key.data(), entry->key.size()),
+                winner.score, std::string(entry->key.data(), entry->key.size()),
                 entry->value});
         }
     }

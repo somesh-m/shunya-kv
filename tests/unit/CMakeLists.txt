@@ -1,13 +1,5 @@
 add_executable(cmd_set_unit_test
   cmd_set_test.cc
-  ${SHUNYA_SRC_DIR}/cmd_set.cc
-  ${SHUNYA_SRC_DIR}/router.cc
-  ${SHUNYA_SRC_DIR}/kv_store.cc
-  ${SHUNYA_SRC_DIR}/vector/vector_store.cc
-  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
-  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
-  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 
 target_include_directories(cmd_set_unit_test PRIVATE
@@ -17,6 +9,7 @@ target_include_directories(cmd_set_unit_test PRIVATE
 )
 
 target_link_libraries(cmd_set_unit_test PRIVATE
+  shunya_core
   Seastar::seastar_testing
   fmt::fmt
   absl::flat_hash_map
@@ -64,14 +57,6 @@ add_test(NAME SET_TEST_TTL_SET_WITHOUT_TTL_OVERWRITE
 
 add_executable(cmd_get_unit_test
   cmd_get_test.cc
-  ${SHUNYA_SRC_DIR}/cmd_get.cc
-  ${SHUNYA_SRC_DIR}/router.cc
-  ${SHUNYA_SRC_DIR}/kv_store.cc
-  ${SHUNYA_SRC_DIR}/vector/vector_store.cc
-  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
-  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
-  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 
 target_include_directories(cmd_get_unit_test PRIVATE
@@ -81,6 +66,7 @@ target_include_directories(cmd_get_unit_test PRIVATE
 )
 
 target_link_libraries(cmd_get_unit_test PRIVATE
+  shunya_core
   Seastar::seastar_testing
   fmt::fmt
   absl::flat_hash_map
@@ -121,17 +107,6 @@ add_test(NAME GET_TEST_TTL_VALID
 
 add_executable(cmd_vset_vsearch_unit_test
   cmd_vset_vsearch_test.cc
-  ${SHUNYA_SRC_DIR}/cmd_info.cc
-  ${SHUNYA_SRC_DIR}/cmd_vset.cc
-  ${SHUNYA_SRC_DIR}/cmd_vsearch.cc
-  ${SHUNYA_SRC_DIR}/cmd_vget.cc
-  ${SHUNYA_SRC_DIR}/router.cc
-  ${SHUNYA_SRC_DIR}/kv_store.cc
-  ${SHUNYA_SRC_DIR}/vector/vector_store.cc
-  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
-  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
-  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 
 target_include_directories(cmd_vset_vsearch_unit_test PRIVATE
@@ -141,6 +116,7 @@ target_include_directories(cmd_vset_vsearch_unit_test PRIVATE
 )
 
 target_link_libraries(cmd_vset_vsearch_unit_test PRIVATE
+  shunya_core
   Seastar::seastar_testing
   fmt::fmt
   absl::flat_hash_map
@@ -166,15 +142,6 @@ add_test(NAME VECTOR_TEST_INDEX_BUILD
 
 add_executable(cmd_node_info_unit_test
   cmd_node_info_test.cc
-  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
-  ${SHUNYA_SRC_DIR}/node_info_helpers.cc
-  ${SHUNYA_SRC_DIR}/router.cc
-  ${SHUNYA_SRC_DIR}/kv_store.cc
-  ${SHUNYA_SRC_DIR}/vector/vector_store.cc
-  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
-  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
-  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 
 target_include_directories(cmd_node_info_unit_test PRIVATE
@@ -184,6 +151,7 @@ target_include_directories(cmd_node_info_unit_test PRIVATE
 )
 
 target_link_libraries(cmd_node_info_unit_test PRIVATE
+  shunya_core
   Seastar::seastar_testing
   fmt::fmt
   absl::flat_hash_map
@@ -208,7 +176,6 @@ add_test(NAME NODE_INFO_OTHER_NODE_TEST
 
 add_executable(sieve_policy_unit_test
   sieve_policy_test.cc
-  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
 )
 
 target_include_directories(sieve_policy_unit_test PRIVATE
@@ -218,6 +185,7 @@ target_include_directories(sieve_policy_unit_test PRIVATE
 )
 
 target_link_libraries(sieve_policy_unit_test PRIVATE
+  shunya_core
   Seastar::seastar_testing
   fmt::fmt
   absl::flat_hash_map
@@ -258,8 +226,6 @@ add_test(NAME SIEVE_POLICY_HAND_WRAP_AROUND
 
 add_executable(object_pool_unit_test
   object_pool_test.cc
-  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
-  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
 )
 
 target_include_directories(object_pool_unit_test PRIVATE
@@ -269,6 +235,7 @@ target_include_directories(object_pool_unit_test PRIVATE
 )
 
 target_link_libraries(object_pool_unit_test PRIVATE
+  shunya_core
   Seastar::seastar_testing
   fmt::fmt
   absl::flat_hash_map
@@ -293,30 +260,6 @@ add_test(NAME OBJECT_POOL_CREATE_OVERFLOW
 
 add_executable(orchestrator_unit_test
   orchestrator_test.cc
-  ${SHUNYA_SRC_DIR}/conn/orchestrator.cc
-  ${SHUNYA_SRC_DIR}/conn/socket_server.cc
-  ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
-  ${SHUNYA_SRC_DIR}/conn/resp_handler.cc
-  ${SHUNYA_SRC_DIR}/conn/connections.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_stream_processor.cc
-  ${SHUNYA_SRC_DIR}/commands.cc
-  ${SHUNYA_SRC_DIR}/cmd_set.cc
-  ${SHUNYA_SRC_DIR}/cmd_vdelete.cc
-  ${SHUNYA_SRC_DIR}/cmd_vget.cc
-  ${SHUNYA_SRC_DIR}/cmd_vset.cc
-  ${SHUNYA_SRC_DIR}/cmd_vsearch.cc
-  ${SHUNYA_SRC_DIR}/cmd_get.cc
-  ${SHUNYA_SRC_DIR}/cmd_info.cc
-  ${SHUNYA_SRC_DIR}/cmd_quit.cc
-  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
-  ${SHUNYA_SRC_DIR}/node_info_helpers.cc
-  ${SHUNYA_SRC_DIR}/router.cc
-  ${SHUNYA_SRC_DIR}/kv_store.cc
-  ${SHUNYA_SRC_DIR}/vector/vector_store.cc
-  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
-  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
-  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 
 target_include_directories(orchestrator_unit_test PRIVATE
@@ -326,6 +269,7 @@ target_include_directories(orchestrator_unit_test PRIVATE
 )
 
 target_link_libraries(orchestrator_unit_test PRIVATE
+  shunya_core
   Seastar::seastar_testing
   fmt::fmt
   absl::flat_hash_map
@@ -388,27 +332,6 @@ add_test(NAME OBJECT_POOL_REUSED_ENTRY_RELINKS_SANCTUARY_WITHOUT_PROBATION
 add_executable(resp_handler_unit_test
   resp_stream_extractor_test.cc
   resp_request_test.cc
-  ${SHUNYA_SRC_DIR}/conn/resp_handler.cc
-  ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_stream_processor.cc
-  ${SHUNYA_SRC_DIR}/commands.cc
-  ${SHUNYA_SRC_DIR}/cmd_set.cc
-  ${SHUNYA_SRC_DIR}/cmd_vdelete.cc
-  ${SHUNYA_SRC_DIR}/cmd_vget.cc
-  ${SHUNYA_SRC_DIR}/cmd_vset.cc
-  ${SHUNYA_SRC_DIR}/cmd_vsearch.cc
-  ${SHUNYA_SRC_DIR}/cmd_get.cc
-  ${SHUNYA_SRC_DIR}/cmd_info.cc
-  ${SHUNYA_SRC_DIR}/cmd_quit.cc
-  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
-  ${SHUNYA_SRC_DIR}/node_info_helpers.cc
-  ${SHUNYA_SRC_DIR}/router.cc
-  ${SHUNYA_SRC_DIR}/kv_store.cc
-  ${SHUNYA_SRC_DIR}/vector/vector_store.cc
-  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
-  ${SHUNYA_SRC_DIR}/pool/vector_pool.cc
-  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 
 target_include_directories(resp_handler_unit_test PRIVATE
@@ -418,6 +341,7 @@ target_include_directories(resp_handler_unit_test PRIVATE
 )
 
 target_link_libraries(resp_handler_unit_test PRIVATE
+  shunya_core
   Seastar::seastar_testing
   fmt::fmt
   absl::flat_hash_map
@@ -502,12 +426,6 @@ add_test(NAME RESP_REQUEST_HANDLER_INVALID_COMMAND
 
 add_executable(socket_handler_unit_test
   socket_handler_test.cc
-  ${SHUNYA_SRC_DIR}/conn/socket_handler.cc
-  ${SHUNYA_SRC_DIR}/cmd_node_info.cc
-  ${SHUNYA_SRC_DIR}/node_info_helpers.cc
-  ${SHUNYA_SRC_DIR}/pool/object_pool.cc
-  ${SHUNYA_SRC_DIR}/eviction/sieve_policy.cc
-  ${SHUNYA_SRC_DIR}/resp/resp_writer.cc
 )
 
 target_include_directories(socket_handler_unit_test PRIVATE
@@ -517,6 +435,7 @@ target_include_directories(socket_handler_unit_test PRIVATE
 )
 
 target_link_libraries(socket_handler_unit_test PRIVATE
+  shunya_core
   Seastar::seastar_testing
   fmt::fmt
   absl::flat_hash_map

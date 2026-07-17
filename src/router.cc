@@ -2,7 +2,6 @@
 #include "router.hh"
 
 #include <algorithm>
-#include <iterator>
 #include <utility>
 
 #include <seastar/core/future-util.hh>
@@ -43,7 +42,9 @@ future<> service::start(const db_config &cfg) {
         router_logger.warn("Unable to load centroid table '{}' on shard {}",
                            config_->centroid_table_path, this_shard_id());
     } else {
-        router_logger.info("Loaded {} centroids (dimension {}) on shard {}",
+        router_logger.info("Vector table config parsed: path='{}', "
+                           "centroids={}, dimension={}, shard={}",
+                           "/home/sohmesh-mohan/kv/global_routing.tbl",
                            global_centroid_routing_.num_centroids(),
                            global_centroid_routing_.dimensions(),
                            this_shard_id());
@@ -239,7 +240,7 @@ service::vsearch(std::string_view index, std::vector<float> query_embedding) {
     co_await ensure_started();
     (void)index;
     const auto owners =
-        global_centroid_routing_.route_embedding(query_embedding, 5);
+        global_centroid_routing_.route_embedding(query_embedding, 1);
     if (owners.empty()) {
         co_return std::vector<VectorSearchResult>{};
     }
@@ -270,20 +271,23 @@ service::vsearch(std::string_view index, std::vector<float> query_embedding) {
 
     auto per_shard =
         co_await seastar::when_all_succeed(pending.begin(), pending.end());
-    std::vector<VectorSearchResult> results;
-    results.reserve(per_shard.size() * kDefaultVsearchTopK);
+    VectorResultQueue winners;
     for (auto &shard_results : per_shard) {
-        results.insert(results.end(),
-                       std::make_move_iterator(shard_results.begin()),
-                       std::make_move_iterator(shard_results.end()));
+        for (auto &result : shard_results) {
+            winners.push(std::move(result));
+            if (winners.size() > kDefaultVsearchTopK) {
+                winners.pop();
+            }
+        }
     }
-    std::sort(results.begin(), results.end(),
-              [](const VectorSearchResult &a, const VectorSearchResult &b) {
-                  return a.score > b.score;
-              });
-    if (results.size() > kDefaultVsearchTopK) {
-        results.resize(kDefaultVsearchTopK);
+
+    std::vector<VectorSearchResult> results;
+    results.reserve(winners.size());
+    while (!winners.empty()) {
+        results.push_back(winners.top());
+        winners.pop();
     }
+    std::reverse(results.begin(), results.end());
     co_return results;
 }
 

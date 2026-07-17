@@ -68,9 +68,9 @@ struct HnswIndex {
     // node_id -> real key
     std::vector<GenerationId> member_keys;
     std::optional<std::size_t> entry_point;
-    std::size_t m = 16;
-    std::size_t ef_construction = 64;
-    std::size_t ef_search = 64;
+    std::size_t m = 32;
+    std::size_t ef_construction = 128;
+    std::size_t ef_search = 32;
     std::size_t max_level = 0;
     std::vector<bool> deleted;
     absl::flat_hash_map<GenerationId, std::size_t> key_to_node;

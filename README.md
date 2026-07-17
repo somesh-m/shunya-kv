@@ -41,10 +41,12 @@ ShunyaKV is built for extreme efficiency. As CPU resources increase, throughput 
 You can build **ShunyaKV** directly from source using CMake. The following steps will compile the project and generate the binaries:
 
 ```bash
-mkdir build && cd build
-cmake ..
-make -j
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 8
 ```
+
+The build automatically uses `ccache` when it is installed. Adjust the
+parallelism for your available memory; avoid an unbounded `make -j` build.
 
 All build artifacts will be created inside the `build/` directory.
 

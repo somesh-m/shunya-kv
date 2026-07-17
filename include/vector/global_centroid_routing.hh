@@ -7,6 +7,7 @@
 #include <fstream>
 #include <limits>
 #include <optional>
+#include <queue>
 #include <span>
 #include <string>
 #include <vector>
@@ -105,34 +106,41 @@ class GlobalCentroidRouting {
             centroid_id id;
         };
 
-        std::vector<ScoredCentroid> scored;
-        scored.reserve(num_centroids_);
+        const auto is_better = [](const ScoredCentroid &a,
+                                  const ScoredCentroid &b) {
+            if (a.score != b.score) {
+                return a.score > b.score;
+            }
+            return a.id < b.id;
+        };
+
+        const std::size_t probe_count = std::min<std::size_t>(
+            nprobe, static_cast<std::size_t>(num_centroids_));
+        std::priority_queue<ScoredCentroid, std::vector<ScoredCentroid>,
+                            decltype(is_better)>
+            best_centroids(is_better);
+
         for (centroid_id id = 0; id < num_centroids_; ++id) {
             const std::span<const float> centroid(
                 centroids_.data() + static_cast<std::size_t>(id) * dimensions_,
                 dimensions_);
             const float score = static_cast<float>(
                 ::vdb::find_cosine_similarity(query_embedding, centroid));
-            scored.push_back(ScoredCentroid{.score = score, .id = id});
+            const ScoredCentroid candidate{.score = score, .id = id};
+            if (best_centroids.size() < probe_count) {
+                best_centroids.push(candidate);
+            } else if (is_better(candidate, best_centroids.top())) {
+                best_centroids.pop();
+                best_centroids.push(candidate);
+            }
         }
 
-        const std::size_t probe_count = std::min(nprobe, scored.size());
-        std::partial_sort(
-            scored.begin(), scored.begin() + probe_count, scored.end(),
-            [](const ScoredCentroid &a, const ScoredCentroid &b) {
-                if (a.score != b.score) {
-                    return a.score > b.score;
-                }
-                return a.id < b.id;
-            });
-
-        std::vector<VectorPoint> routes;
-        routes.reserve(probe_count);
-        for (std::size_t i = 0; i < probe_count; ++i) {
-            const centroid_id id = scored[i].id;
-            routes.push_back(
-                VectorPoint{.id = id,
-                            .target_shard_id = centroid_to_shard_[id]});
+        std::vector<VectorPoint> routes(probe_count);
+        for (std::size_t i = probe_count; i > 0; --i) {
+            const centroid_id id = best_centroids.top().id;
+            routes[i - 1] = VectorPoint{
+                .id = id, .target_shard_id = centroid_to_shard_[id]};
+            best_centroids.pop();
         }
         return routes;
     }

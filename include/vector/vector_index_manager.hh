@@ -14,6 +14,7 @@
 #include "vector/helper.hh"
 #include "vector/search_result.hh"
 #include "vector/vector_entry.hh"
+#include "vector/vector_storage_manager.hh"
 #include "vector/vector_types.hh"
 #include <algorithm>
 #include <functional>
@@ -22,9 +23,12 @@
 #include <random>
 #include <seastar/coroutine/maybe_yield.hh>
 #include <stdexcept>
-#include "vector/vector_storage_manager.hh"
 
 namespace shunyakv {
+inline seastar::logger &memtable_logger() {
+    static seastar::logger logger{"memtable_logger"};
+    return logger;
+}
 class VectorIndexManager {
   private:
     EntryPool &entry_pool_;
@@ -42,6 +46,7 @@ class VectorIndexManager {
 
     seastar::future<bool> insert(key_t key, std::vector<float> embedding,
                                  std::string value, centroid_id centroid_id) {
+        // memtable_logger().info("Centroid Id: {}", centroid_id);
         if (storage_.exists(key)) {
             co_return false;
         }
