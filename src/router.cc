@@ -240,7 +240,7 @@ service::vsearch(std::string_view index, std::vector<float> query_embedding) {
     co_await ensure_started();
     (void)index;
     const auto owners =
-        global_centroid_routing_.route_embedding(query_embedding, 1);
+        global_centroid_routing_.route_embedding(query_embedding, 2);
     if (owners.empty()) {
         co_return std::vector<VectorSearchResult>{};
     }

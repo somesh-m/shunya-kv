@@ -11,6 +11,7 @@
 #include <memory>
 #include <queue>
 #include <random>
+#include <seastar/core/reactor.hh>
 #include <seastar/core/semaphore.hh>
 #include <seastar/coroutine/maybe_yield.hh>
 #include <utility>
@@ -37,8 +38,10 @@ class Memtable {
     absl::flat_hash_set<GenerationId> entries_;
     std::deque<absl::flat_hash_set<GenerationId>> pending_compilation_queue_;
     std::vector<std::shared_ptr<HnswIndex>> immutable_indexes_;
+    bool hnsw_compaction_running_{false};
 
     seastar::future<> build_hnsw_index();
+    void start_hnsw_compaction();
     seastar::future<> compact_hnsw_indexes();
     seastar::future<> rebuild_hnsw_index(HnswIndex &index);
     seastar::future<> insert_into_hnsw_index(GenerationId id, HnswIndex &index);
@@ -130,12 +133,31 @@ inline seastar::future<> Memtable::build_hnsw_index() {
         }
         if (!index->member_keys.empty()) {
             immutable_indexes_.push_back(std::move(index));
-            // if (immutable_indexes_.size() > max_immutable_indexes_) {
-            //     co_await compact_hnsw_indexes();
-            // }
+            if (immutable_indexes_.size() > max_immutable_indexes_) {
+                start_hnsw_compaction();
+            }
         }
     }
     co_return;
+}
+
+inline void Memtable::start_hnsw_compaction() {
+    if (hnsw_compaction_running_ ||
+        immutable_indexes_.size() <= max_immutable_indexes_) {
+        return;
+    }
+
+    hnsw_compaction_running_ = true;
+    seastar::engine().run_in_background(
+        compact_hnsw_indexes()
+            .then([this] {
+                hnsw_compaction_running_ = false;
+                start_hnsw_compaction();
+            })
+            .handle_exception([this](std::exception_ptr ep) {
+                hnsw_compaction_running_ = false;
+                return seastar::make_exception_future<>(ep);
+            }));
 }
 
 inline seastar::future<> Memtable::compact_hnsw_indexes() {
@@ -177,7 +199,15 @@ inline seastar::future<> Memtable::compact_hnsw_indexes() {
         }
     }
 
-    immutable_indexes_.clear();
+    immutable_indexes_.erase(
+        std::remove_if(immutable_indexes_.begin(), immutable_indexes_.end(),
+                       [&immutable_indexes_snapshot](const auto &index) {
+                           return std::find(immutable_indexes_snapshot.begin(),
+                                            immutable_indexes_snapshot.end(),
+                                            index) !=
+                                  immutable_indexes_snapshot.end();
+                       }),
+        immutable_indexes_.end());
     if (!compacted->member_keys.empty()) {
         immutable_indexes_.push_back(std::move(compacted));
     }

@@ -68,8 +68,8 @@ struct HnswIndex {
     // node_id -> real key
     std::vector<GenerationId> member_keys;
     std::optional<std::size_t> entry_point;
-    std::size_t m = 32;
-    std::size_t ef_construction = 128;
+    std::size_t m = 24;
+    std::size_t ef_construction = 256;
     std::size_t ef_search = 32;
     std::size_t max_level = 0;
     std::vector<bool> deleted;
