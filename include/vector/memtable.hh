@@ -133,9 +133,9 @@ inline seastar::future<> Memtable::build_hnsw_index() {
         }
         if (!index->member_keys.empty()) {
             immutable_indexes_.push_back(std::move(index));
-            if (immutable_indexes_.size() > max_immutable_indexes_) {
-                start_hnsw_compaction();
-            }
+            // if (immutable_indexes_.size() > max_immutable_indexes_) {
+            //     start_hnsw_compaction();
+            // }
         }
     }
     co_return;
@@ -310,7 +310,26 @@ Memtable::greedy_search_vector(const std::vector<float> &query,
         if (!has_hnsw_level(current, level, index)) {
             break;
         }
-        for (const std::size_t neighbour : index.neighbours[current][level]) {
+        const auto &neighbours = index.neighbours[current][level];
+        constexpr std::size_t prefetch_distance = 10;
+        for (std::size_t i = 0; i < neighbours.size(); ++i) {
+            const std::size_t prefetch_index = i + prefetch_distance;
+            if (prefetch_index < neighbours.size()) {
+                const std::size_t next = neighbours[prefetch_index];
+                if (is_valid_hnsw_node(next, index)) {
+                    __builtin_prefetch(&index.neighbours[next], 0, 1);
+                    const VectorEntry *entry =
+                        storage_.get(index.member_keys[next]);
+                    if (entry != nullptr) {
+                        __builtin_prefetch(entry, 0, 1);
+                        if (!entry->embedding.empty()) {
+                            __builtin_prefetch(entry->embedding.data(), 0, 1);
+                        }
+                    }
+                }
+            }
+
+            const std::size_t neighbour = neighbours[i];
             if (++scored_count % yield_every_ == 0) {
                 co_await seastar::coroutine::maybe_yield();
             }
