@@ -130,7 +130,7 @@ This mode enables high-performance packet processing using DPDK.
 
 To evaluate performance and run load tests, use the dedicated benchmarking tool:
 
-https://github.com/somesh-m/shunyakv-benchmark-cpp
+https://github.com/somesh-m/benchmark-shunyakv
 
 The benchmarking tool supports:
 

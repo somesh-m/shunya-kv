@@ -47,7 +47,7 @@ SET <key> <value> EX <ttl>
 ### Examples
 
 ```text
-SET user:1 alice
+SET user:1 name
 SET session:42 payload EX 300
 ```
 
